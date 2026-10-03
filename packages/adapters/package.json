@@ -1,0 +1,14 @@
+{
+  "name": "@mitos/adapters",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "^1.3.14"
+  },
+  "bin": {
+    "mitos-claude": "./src/entrypoints/claude.ts",
+    "mitos-codex": "./src/entrypoints/codex.ts",
+    "mitos-hermes": "./src/entrypoints/hermes.ts",
+    "mitos-opencode": "./src/entrypoints/opencode.ts"
+  }
+}

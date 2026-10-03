@@ -1,0 +1,8 @@
+[test]
+# Without this, "solid-js" resolves to its SSR server.js build under `bun
+# test` (Bun's default "node" export condition), where createMemo computes
+# once and never reacts to signal changes again — this preload is the same
+# one `bun run`/`bun --preload @opentui/solid/preload` uses for the real
+# app; it installs a Bun plugin that swaps server.js's contents for the
+# real reactive solid.js build at load time.
+preload = ["@opentui/solid/preload"]

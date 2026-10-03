@@ -1,0 +1,14 @@
+{{#color "accent"}}▍ tokens{{/color}}{{#if usage.harness}} · {{usage.harness}}{{/if}}
+{{#color "textDim"}}────────────────────────{{/color}}
+{{#if usage.harness}}
+{{#color "textDim"}}this thread, all harnesses{{/color}}
+tokens     in {{usage.tokens_in}}
+           out {{usage.tokens_out}}
+           cached {{usage.tokens_cached}}
+cost       {{#if usage.cost}}{{usage.cost}}{{else}}{{#color "textDim"}}not reported{{/color}}{{/if}}
+
+context    {{#gradient "success" "warning" "err"}}{{usage.context_percent}}{{/gradient}}
+{{bar usage.context_percent 24}}
+{{else}}
+{{#color "textDim"}}waiting for the first turn to report usage…{{/color}}
+{{/if}}

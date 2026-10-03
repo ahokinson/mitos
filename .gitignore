@@ -1,0 +1,11 @@
+/target/
+/dist/
+/node_modules/
+/packages/*/node_modules/
+/result
+/result-*
+.env*
+*.db
+*.db-wal
+*.db-shm
+.DS_Store

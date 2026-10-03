@@ -1,0 +1,19 @@
+{{#color "accent"}}▍ usage{{/color}}{{#if usage.harness}} · {{usage.harness}}{{/if}}
+{{#color "textDim"}}────────────────────────{{/color}}
+{{#if usage.harness}}
+{{#color "textDim"}}Current session{{/color}}
+{{#if usage.plan_5h}}{{bar usage.plan_5h 24}} {{#gradient "success" "warning" "err"}}{{usage.plan_5h}}{{/gradient}}
+{{#color "textDim"}}resets {{usage.plan_5h_resets}} · in {{usage.plan_5h_remaining}}{{/color}}{{else}}{{#color "textDim"}}not reported{{/color}}{{/if}}
+
+{{#color "textDim"}}Current week{{/color}}
+{{#if usage.plan_week}}{{bar usage.plan_week 24}} {{#gradient "success" "warning" "err"}}{{usage.plan_week}}{{/gradient}}
+{{#color "textDim"}}resets {{usage.plan_week_resets}} · in {{usage.plan_week_remaining}}{{/color}}{{else}}{{#color "textDim"}}not reported{{/color}}{{/if}}
+
+{{#color "textDim"}}Context{{/color}}
+{{bar usage.context_percent 24}} {{usage.context_percent}}
+{{#if usage.cost}}
+cost       {{usage.cost}}
+{{/if}}
+{{else}}
+{{#color "textDim"}}waiting for the first turn to report usage…{{/color}}
+{{/if}}
