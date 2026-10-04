@@ -17,11 +17,12 @@ const ASSET_ROOTS = ["../../assets/parsers", "./assets/parsers"].map((path) =>
   fileURLToPath(new URL(path, import.meta.url)),
 );
 
-function installedWasmRoot(): string | undefined {
+export function installedWasmRoot(
+  resolveModule: (specifier: string) => string = (specifier) =>
+    import.meta.resolve(specifier),
+): string | undefined {
   try {
-    return fileURLToPath(
-      new URL("./out/", import.meta.resolve("tree-sitter-wasm")),
-    );
+    return fileURLToPath(new URL("./out/", resolveModule("tree-sitter-wasm")));
   } catch {
     return undefined;
   }
