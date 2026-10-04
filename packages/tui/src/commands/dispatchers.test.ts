@@ -625,3 +625,161 @@ test("/hooks works with no thread selected", async () => {
   await run("/hooks", ctx);
   expect(notes[0]?.threadId).toBeNull();
 });
+
+test("annotation commands need a selected thread", async () => {
+  for (const line of ["/note x", "/decision x", "/question x"]) {
+    const { ctx, notes, calls } = createFakeContext({});
+    await run(line, ctx);
+    expect(calls).toEqual([]);
+    expect(notes[0]?.lines[0]).toBe("No thread selected.");
+  }
+});
+
+test("annotation commands print usage when given no text", async () => {
+  for (const name of ["note", "decision", "question"]) {
+    const { ctx, notes, calls } = createFakeContext({
+      selected: CLAUDE_THREAD,
+    });
+    await run(`/${name}`, ctx);
+    expect(calls).toEqual([]);
+    expect(notes[0]?.lines[0]).toBe(`Usage: /${name} <text>`);
+  }
+});
+
+test("annotation commands surface a failure as an error note", async () => {
+  for (const line of ["/note x", "/decision x", "/question x"]) {
+    const { ctx, notes } = createFakeContext({
+      selected: CLAUDE_THREAD,
+      failWith: { noteThread: new Error("write failed") },
+    });
+    await run(line, ctx);
+    expect(notes[0]?.tone).toBe(FeedbackTone.Error);
+    expect(notes[0]?.lines[0]).toBe("write failed");
+  }
+});
+
+test("/mode needs a selected thread and surfaces failures", async () => {
+  const none = createFakeContext({});
+  await run("/mode plan", none.ctx);
+  expect(none.notes[0]?.lines[0]).toBe("No thread selected.");
+
+  const failing = createFakeContext({
+    selected: CLAUDE_THREAD,
+    failWith: { setMode: new Error("no mode") },
+  });
+  await run("/mode build", failing.ctx);
+  expect(failing.notes[0]?.lines[0]).toBe("no mode");
+});
+
+test("request commands need a selected thread", async () => {
+  const { ctx, notes, calls } = createFakeContext({});
+  await run("/approve", ctx);
+  expect(calls).toEqual([]);
+  expect(notes[0]?.lines[0]).toBe("No thread selected.");
+});
+
+test("/answer rejects non-questions and empty text", async () => {
+  const wrongKind = createFakeContext({
+    selected: CLAUDE_THREAD,
+    requests: [request(RequestKind.Permission)],
+  });
+  await run("/answer yes", wrongKind.ctx);
+  expect(wrongKind.calls).toEqual([]);
+  expect(wrongKind.notes[0]?.lines[0]).toContain("use /approve or /deny");
+
+  const empty = createFakeContext({
+    selected: CLAUDE_THREAD,
+    requests: [request(RequestKind.Question)],
+  });
+  await run("/answer", empty.ctx);
+  expect(empty.calls).toEqual([]);
+  expect(empty.notes[0]?.lines[0]).toBe("Usage: /answer <text>");
+});
+
+test("/harness validates its argument and surfaces failures", async () => {
+  const bare = createFakeContext({ selected: CLAUDE_THREAD });
+  await run("/harness", bare.ctx);
+  expect(bare.notes[0]?.lines[0]).toBe("Usage: /harness <name>");
+
+  const unknown = createFakeContext({ selected: CLAUDE_THREAD });
+  await run("/harness hermes", unknown.ctx);
+  expect(unknown.calls).toEqual([]);
+  expect(unknown.notes[0]?.lines[0]).toContain("Unknown or uninstalled");
+
+  const failing = createFakeContext({
+    selected: CLAUDE_THREAD,
+    failWith: { reassignHarness: new Error("refused") },
+  });
+  await run("/harness codex", failing.ctx);
+  expect(failing.notes[0]?.lines[0]).toBe("refused");
+});
+
+test("/resume without a query prints usage", async () => {
+  const { ctx, notes, state } = createFakeContext({ threads: [CLAUDE_THREAD] });
+  await run("/resume", ctx);
+  expect(state.selected).toBeNull();
+  expect(notes[0]?.tone).toBe(FeedbackTone.Error);
+  expect(notes[0]?.lines[0]).toContain("Usage: /resume");
+});
+
+test("/archive without a selection or query errors, and surfaces failures", async () => {
+  const none = createFakeContext({});
+  await run("/archive", none.ctx);
+  expect(none.calls).toEqual([]);
+  expect(none.notes[0]?.lines[0]).toContain("No thread selected");
+
+  const failing = createFakeContext({
+    selected: CLAUDE_THREAD,
+    failWith: { archiveThread: new Error("locked") },
+  });
+  await run("/archive", failing.ctx);
+  expect(failing.notes[0]?.lines[0]).toBe("locked");
+});
+
+test("/delete <query> stages a pending delete with a warning", async () => {
+  const { ctx, notes, state } = createFakeContext({
+    threads: [CLAUDE_THREAD],
+    selected: null,
+  });
+  await run("/delete fix the bug", ctx);
+  expect(state.pendingDelete).toEqual({
+    threadId: CLAUDE_THREAD.id,
+    label: "fix the bug",
+  });
+  expect(notes[0]?.lines).toHaveLength(2);
+});
+
+test("/delete without a query prints usage", async () => {
+  const { ctx, notes } = createFakeContext({ selected: CLAUDE_THREAD });
+  await run("/delete", ctx);
+  expect(notes[0]?.lines[0]).toContain("Usage: /delete <query>");
+});
+
+test("/delete confirm needs a pending delete and surfaces failures", async () => {
+  const none = createFakeContext({ selected: CLAUDE_THREAD });
+  await run("/delete confirm 1111", none.ctx);
+  expect(none.notes[0]?.lines[0]).toContain("No delete is pending");
+
+  const failing = createFakeContext({
+    selected: CLAUDE_THREAD,
+    failWith: { deleteThread: new Error("busy") },
+  });
+  failing.state.pendingDelete = { threadId: CLAUDE_THREAD.id, label: "x" };
+  await run("/delete confirm 1111", failing.ctx);
+  expect(failing.notes[0]?.lines[0]).toBe("busy");
+});
+
+test("/delete confirm on another thread keeps the current selection", async () => {
+  const { ctx, state, calls } = createFakeContext({ selected: CODEX_THREAD });
+  state.pendingDelete = { threadId: CLAUDE_THREAD.id, label: "x" };
+  await run("/delete confirm 1111", ctx);
+  expect(calls).toEqual([{ name: "deleteThread", args: [CLAUDE_THREAD.id] }]);
+  expect(state.selected).toEqual(CODEX_THREAD);
+});
+
+test("/delete confirm without an id prefix is rejected", async () => {
+  const { ctx, state, calls } = createFakeContext({ selected: CLAUDE_THREAD });
+  state.pendingDelete = { threadId: CLAUDE_THREAD.id, label: "x" };
+  await run("/delete confirm", ctx);
+  expect(calls).toEqual([]);
+});

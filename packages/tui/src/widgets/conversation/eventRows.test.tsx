@@ -117,6 +117,74 @@ test("a non-edit tool call renders only its preview line", async () => {
   expect(frame).not.toContain("+0 -0");
 });
 
+test("user and assistant messages render their content with their glyphs", async () => {
+  const user = await frameOf({
+    ...toolEvent(EventKind.UserMessage, null),
+    content: "please fix it",
+  });
+  expect(user).toContain("› please fix it");
+  const assistant = await frameOf({
+    ...toolEvent(EventKind.AssistantMessage, null),
+    content: "all done",
+  });
+  expect(assistant).toContain("✦");
+});
+
+test("notes, errors and requests render as one-line rows", async () => {
+  const note = await frameOf({
+    ...toolEvent(EventKind.Note, null),
+    content: "remember this",
+  });
+  expect(note).toContain("· remember this");
+  const error = await frameOf({
+    ...toolEvent(EventKind.Error, null),
+    content: "it broke",
+  });
+  expect(error).toContain("× it broke");
+  const mode = await frameOf(
+    toolEvent(EventKind.ModeChanged, { mode: "plan" }),
+  );
+  expect(mode).toContain("Mode: plan");
+  const decision = await frameOf({
+    ...toolEvent(EventKind.Decision, null),
+    content: "ship it",
+  });
+  expect(decision).toContain("◆ ship it");
+});
+
+test("tool glyphs use tone colors for each tool kind", async () => {
+  for (const name of ["Grep", "WebFetch", "Task", "TodoWrite", "Mystery"]) {
+    const frame = await frameOf(
+      toolEvent(EventKind.ToolCall, {
+        type: "tool_use",
+        name,
+        input: { pattern: "x" },
+      }),
+    );
+    expect(frame.trim().length).toBeGreaterThan(0);
+  }
+});
+
+test("an unnamed tool result shows a completion line", async () => {
+  const frame = await frameOf({
+    ...toolEvent(EventKind.ToolResult, { type: "tool_result" }),
+    content: "",
+  });
+  expect(frame).toContain("completed");
+});
+
+test("a single hidden line says line, not lines", async () => {
+  const content = Array.from({ length: 5 }, (_, i) => `out ${i + 1}`).join(
+    "\n",
+  );
+  const frame = await frameOf({
+    ...toolEvent(EventKind.ToolResult, { type: "tool_result" }),
+    content,
+  });
+  expect(frame).toContain("… +1 more line");
+  expect(frame).not.toContain("more lines");
+});
+
 test("a shell call shows its glyph, name and the head of a long command", async () => {
   const command = Array.from({ length: 6 }, (_, i) => `step ${i + 1}`).join("\n");
   const frame = await frameOf({

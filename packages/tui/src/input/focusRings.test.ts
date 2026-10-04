@@ -15,6 +15,15 @@ function withRing<R>(
   return result;
 }
 
+test("focus() jumps to a known id and ignores an unknown one", () => {
+  withRing(["0.0", "0.1", "0.2"], (ring) => {
+    ring.focus("0.2");
+    expect(ring.current()).toBe("0.2");
+    ring.focus("nope");
+    expect(ring.current()).toBe("0.2");
+  });
+});
+
 test("current() is null for an empty ring", () => {
   withRing([], (ring) => expect(ring.current()).toBeNull());
 });

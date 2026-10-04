@@ -27,8 +27,18 @@ test("diffTexts reports a replaced line with context and counts", () => {
 test("diffTexts trims blank context at the edges of a hunk", () => {
   const diff = diffTexts("a.rs", "\n\nuse b;\nx\n", "\n\nuse b;\n");
   expect(diff?.diff).toBe(
-    ["--- a/a.rs", "+++ b/a.rs", "@@ -3,2 +3,1 @@", " use b;", "-x", ""].join("\n"),
+    ["--- a/a.rs", "+++ b/a.rs", "@@ -3,2 +3,1 @@", " use b;", "-x", ""].join(
+      "\n",
+    ),
   );
+});
+
+test("diffTexts falls back to remove-all/add-all for very large rewrites", () => {
+  const before = Array.from({ length: 2100 }, (_, i) => `old${i}`).join("\n");
+  const after = Array.from({ length: 2100 }, (_, i) => `new${i}`).join("\n");
+  const diff = diffTexts("big.ts", before, after);
+  expect(diff?.removed).toBe(2100);
+  expect(diff?.added).toBe(2100);
 });
 
 test("diffTexts keeps far-apart changes in separate hunks", () => {

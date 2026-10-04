@@ -16,6 +16,29 @@ function leafBox(content: Leaf, style: Record<string, unknown>) {
   )
 }
 
+test("an inline MetaRow puts label and value on one line, in a custom color", async () => {
+  const setup = await testRender(
+    () => (
+      <ThemeProvider theme={resolveTheme({ name: "mocha" })}>
+        <box width={30} flexDirection="column">
+          <MetaRow label="status" value="active" valueColor="#ff0000" />
+          <MetaRow label="mode" value="plan" />
+        </box>
+      </ThemeProvider>
+    ),
+    { width: 32, height: 4 },
+  )
+
+  try {
+    await setup.renderOnce()
+    const lines = setup.captureCharFrame().split("\n")
+    expect(lines[0]).toMatch(/status\s+active/)
+    expect(lines[1]).toMatch(/mode\s+plan/)
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
 test("stacked MetaRow values stay intact across two tiled columns, never bleeding into the sibling", async () => {
   const tile: TileNode<Leaf> = {
     direction: LayoutDirection.Row,

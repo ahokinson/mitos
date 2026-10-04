@@ -5,7 +5,10 @@
     "build": "bun run scripts/build.ts",
     "check": "bun run check:ts && cargo fmt --check && bun run lint:rust && cargo test --workspace",
     "check:ts": "biome check packages scripts && bun test --preload @opentui/solid/preload packages/tui/src",
-    "format": "biome check --write packages scripts && cargo fmt",
+    "coverage": "bun run coverage:ts && bun run coverage:rust",
+    "coverage:rust": "cargo llvm-cov --workspace --fail-under-lines 95 --fail-under-functions 95 --lcov --output-path coverage/rust.lcov && cargo llvm-cov report",
+    "coverage:ts": "bun test --preload @opentui/solid/preload --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=coverage/ts packages/tui/src",
+    "format":"biome check --write packages scripts && cargo fmt",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings -D clippy::pedantic"
   },
   "devDependencies": {

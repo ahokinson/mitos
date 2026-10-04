@@ -56,6 +56,41 @@ test("an unreadable template view falls back to the default layout", async () =>
   expect(warnSpy).toHaveBeenCalled();
 });
 
+test("a config directory that cannot be created runs on defaults", async () => {
+  await writeFile(join(dir, "blocker"), "");
+  const handle = await loadConfig(join(dir, "blocker", "nested"));
+  expect(handle.config().layout).toEqual(DEFAULT_LAYOUT_CONFIG);
+  expect(warnSpy).toHaveBeenCalled();
+});
+
+test("an unparseable config file runs on defaults", async () => {
+  await writeFile(join(dir, "mitos.toml"), "this is = = not toml");
+  const handle = await loadConfig(dir);
+  expect(handle.config().layout).toEqual(DEFAULT_LAYOUT_CONFIG);
+  expect(warnSpy).toHaveBeenCalled();
+});
+
+test("a theme name that is neither built in nor declared is dropped", async () => {
+  await writeFile(join(dir, "mitos.toml"), '[theme]\nname = "nonexistent"\n');
+  const handle = await loadConfig(dir);
+  expect(handle.config().theme?.name).toBeUndefined();
+  expect(warnSpy).toHaveBeenCalled();
+});
+
+test("a declared custom theme can be selected by name", async () => {
+  await writeFile(
+    join(dir, "night.toml"),
+    'chrome = "none"\nbackgroundChrome = "#000000"\nbackgroundSelection = "#111111"\ntext = "#ffffff"\ntextMuted = "#eeeeee"\ntextDim = "#dddddd"\naccent = "#0000ff"\nsuccess = "#00ff00"\nwarning = "#ffff00"\nerr = "#ff0000"\n',
+  );
+  await writeFile(
+    join(dir, "mitos.toml"),
+    '[themes]\nnight = "night.toml"\n\n[theme]\nname = "night"\n',
+  );
+  const handle = await loadConfig(dir);
+  expect(handle.config().theme?.name).toBe("night");
+  expect(handle.customThemes().night?.accent).toBe("#0000ff");
+});
+
 test("invalid named layout falls back without discarding unrelated session settings", async () => {
   await writeFile(
     join(dir, "mitos.toml"),

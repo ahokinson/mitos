@@ -36,10 +36,14 @@
           in
           pkgs.mkShell {
             BIOME_BINARY = "${pkgs.biome}/bin/biome";
+            LLVM_COV = "${pkgs.llvm}/bin/llvm-cov";
+            LLVM_PROFDATA = "${pkgs.llvm}/bin/llvm-profdata";
             packages = with pkgs; [
               biome
               bun
               cargo
+              cargo-llvm-cov
+              llvm
               rustc
               rustfmt
               clippy

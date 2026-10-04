@@ -1,6 +1,10 @@
-import { expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   accumulateAssistantDeltas,
+  createThreadEventsState,
   EventKind,
   eventPresentation,
   eventText,
@@ -9,6 +13,7 @@ import {
   toolPreview,
 } from "@session/events.ts";
 import { Tone } from "@theme/themes.ts";
+import { createRoot, createSignal } from "solid-js";
 
 function event(
   partial: Partial<ThreadEvent> & Pick<ThreadEvent, "kind">,
@@ -179,6 +184,130 @@ test("displayed events use distinct semantic glyphs and tones", () => {
   expect(eventPresentation(EventKind.Question)).toEqual({
     glyph: "?",
     tone: Tone.Warning,
+  });
+});
+
+test("remaining event kinds present with their own glyphs", () => {
+  expect(eventPresentation(EventKind.AssistantDelta).glyph).toBe("✦");
+  expect(eventPresentation(EventKind.RequestOpened).glyph).toBe("?");
+  expect(eventPresentation(EventKind.RequestAnswered)).toEqual({
+    glyph: "✓",
+    tone: Tone.Dim,
+  });
+  expect(eventPresentation(EventKind.ModeChanged)).toEqual({
+    glyph: "◇",
+    tone: Tone.Accent,
+  });
+  expect(eventPresentation(EventKind.Usage)).toEqual({
+    glyph: "·",
+    tone: Tone.Dim,
+  });
+});
+
+test("bookkeeping events are not displayed", () => {
+  for (const kind of [
+    EventKind.Status,
+    EventKind.Usage,
+    EventKind.ThreadCreated,
+    EventKind.HarnessBound,
+    EventKind.HarnessUnbound,
+    EventKind.HandoffCarryover,
+    EventKind.Compaction,
+  ])
+    expect(isDisplayEvent(event({ kind }))).toBe(false);
+  for (const kind of [
+    EventKind.UserMessage,
+    EventKind.AssistantMessage,
+    EventKind.AssistantDelta,
+    EventKind.ToolCall,
+    EventKind.ToolResult,
+    EventKind.Error,
+    EventKind.Note,
+    EventKind.Decision,
+    EventKind.Question,
+    EventKind.RequestOpened,
+    EventKind.RequestAnswered,
+    EventKind.ModeChanged,
+  ])
+    expect(isDisplayEvent(event({ kind }))).toBe(true);
+});
+
+test("event text falls back to content, then to nothing", () => {
+  expect(eventText(event({ kind: EventKind.Note, content: "hi" }))).toBe("hi");
+  expect(eventText(event({ kind: EventKind.Note }))).toBe("");
+  expect(
+    eventText(event({ kind: EventKind.RequestAnswered, payload: "text" })),
+  ).toBe("Request answered.");
+});
+
+test("a missing tool result previews as the fallback", () => {
+  expect(toolPreview(null, "started")).toBe("started");
+});
+
+describe("createThreadEventsState", () => {
+  let dir: string;
+  let savedCore: string | undefined;
+
+  async function serve(events: ThreadEvent[]): Promise<void> {
+    const path = join(dir, "core.sh");
+    await writeFile(
+      path,
+      `#!/bin/sh\ncat <<'EOF'\n${JSON.stringify(events)}\nEOF\n`,
+    );
+    await chmod(path, 0o755);
+    process.env.MITOS_CORE = path;
+  }
+
+  beforeEach(async () => {
+    dir = join(tmpdir(), `mitos-events-test-${crypto.randomUUID()}`);
+    await mkdir(dir, { recursive: true });
+    savedCore = process.env.MITOS_CORE;
+  });
+
+  afterEach(async () => {
+    if (savedCore === undefined) delete process.env.MITOS_CORE;
+    else process.env.MITOS_CORE = savedCore;
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("sync appends fresh events and ignores empty polls", async () => {
+    await serve([event({ kind: EventKind.Note, seq: 4 })]);
+    await createRoot(async (dispose) => {
+      const [id] = createSignal<string | null>("t1");
+      const state = createThreadEventsState(id);
+      await Promise.resolve();
+      state.sync();
+      expect(state.events().map((e) => e.seq)).toEqual([4]);
+      await serve([]);
+      state.sync();
+      expect(state.events()).toHaveLength(1);
+      dispose();
+    });
+  });
+
+  test("sync does nothing without a thread", () => {
+    createRoot((dispose) => {
+      const [id] = createSignal<string | null>(null);
+      const state = createThreadEventsState(id);
+      state.sync();
+      expect(state.events()).toEqual([]);
+      dispose();
+    });
+  });
+
+  test("switching threads clears the log", async () => {
+    await serve([event({ kind: EventKind.Note, seq: 1 })]);
+    await createRoot(async (dispose) => {
+      const [id, setId] = createSignal<string | null>("t1");
+      const state = createThreadEventsState(id);
+      await Promise.resolve();
+      state.sync();
+      expect(state.events()).toHaveLength(1);
+      setId("t2");
+      await Promise.resolve();
+      expect(state.events()).toEqual([]);
+      dispose();
+    });
   });
 });
 
