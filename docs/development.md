@@ -19,7 +19,9 @@ same-repository runs, so forks never receive the repository upload token.
 Maintainers must connect the public repository in Codecov and add its upload
 token as the `CODECOV_TOKEN` GitHub Actions secret. The separate OpenSSF
 Scorecard workflow publishes a weekly security report and uploads its SARIF
-result to GitHub Code Scanning.
+result to GitHub Code Scanning. CodeQL scans the Rust and TypeScript sources on
+pull requests, pushes, and weekly. Dependabot opens weekly update pull requests
+for Bun, Cargo, and GitHub Actions dependencies.
 
 For source-based development:
 
