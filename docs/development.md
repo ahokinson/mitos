@@ -10,6 +10,10 @@ bun run build
 development shell; other environments can install it with
 `cargo install cargo-llvm-cov --locked`.
 
+Tree-sitter parser binaries are sourced from the locked `tree-sitter-wasm`
+development dependency when building. They are copied into release bundles but
+are not stored in Git.
+
 ## CI reporting
 
 GitHub Actions runs checks and coverage for pull requests targeting `develop`

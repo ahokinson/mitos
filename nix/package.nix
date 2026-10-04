@@ -5,6 +5,7 @@
   runCommand,
   bun,
   cacert,
+  git,
   makeWrapper,
 }:
 
@@ -74,7 +75,7 @@ let
       cp -r packages/tui/node_modules "$out/packages/tui/"
     '';
     outputHashMode = "recursive";
-    outputHash = "sha256-ennGM4/3wuyuxkiW7eF23m1Pn0tF0GtlUMln586P+8I=";
+    outputHash = "sha256-NWHEOb/5Mu1l6u+yTt4CjOTy/XKGxvRk42zMragC0ls=";
   };
 
   # Plain `cargoLock` (not `cargoHash`) trusts the checksums already pinned
@@ -92,6 +93,7 @@ let
       "-p"
       "mitos"
     ];
+    nativeCheckInputs = [ git ];
   };
 in
 stdenvNoCC.mkDerivation {
