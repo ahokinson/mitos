@@ -270,7 +270,7 @@ fn a_thread_without_a_harness_cannot_send() {
             .err(&["thread", "send", &id, "--message", "hi"])
             .contains("no harness assigned")
     );
-    assert!(bench.ok(&["thread", "attach", &id]).is_empty());
+    assert_eq!(bench.ok(&["thread", "attach", &id]), "");
 }
 
 #[test]
@@ -410,7 +410,7 @@ fn answer_flags_are_checked_before_the_turn_is_contacted() {
 fn requests_are_listed_and_answers_fail_once_the_turn_is_gone() {
     let bench = Workbench::new();
     let id = bench.new_thread();
-    assert!(bench.ok(&["thread", "requests", &id]).is_empty());
+    assert_eq!(bench.ok(&["thread", "requests", &id]), "");
 
     bench.ok(&["thread", "send", &id, "--message", "hello"]);
     bench.ok(&["thread", "send", &id, "--message", "ask permission"]);
@@ -422,18 +422,17 @@ fn requests_are_listed_and_answers_fail_once_the_turn_is_gone() {
             .contains("[permission]")
     );
 
-    assert!(
-        !bench
-            .err(&[
-                "thread",
-                "answer",
-                &id,
-                "--request",
-                "missing",
-                "--response",
-                "{}"
-            ])
-            .is_empty()
+    assert_ne!(
+        bench.err(&[
+            "thread",
+            "answer",
+            &id,
+            "--request",
+            "missing",
+            "--response",
+            "{}"
+        ]),
+        ""
     );
     assert!(
         bench
@@ -448,12 +447,9 @@ fn requests_are_listed_and_answers_fail_once_the_turn_is_gone() {
             ])
             .contains("no longer running")
     );
-    assert!(
-        bench
-            .json(&["thread", "requests", &id])
-            .as_array()
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        bench.json(&["thread", "requests", &id]).as_array().unwrap(),
+        &Vec::<serde_json::Value>::new()
     );
     assert!(
         bench

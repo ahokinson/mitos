@@ -551,7 +551,10 @@ mod tests {
             store.recent_user_messages("workspace", 2).unwrap(),
             ["last", "repeat"]
         );
-        assert!(store.recent_user_messages("other", 5).unwrap().is_empty());
+        assert_eq!(
+            store.recent_user_messages("other", 5).unwrap(),
+            Vec::<String>::new()
+        );
         finish(root);
     }
 

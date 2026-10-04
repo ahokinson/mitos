@@ -293,7 +293,7 @@ fn send_without_a_harness_is_rejected_before_anything_is_recorded() {
 
     assert!(error.to_string().contains("no harness assigned"));
     assert_eq!(fixture.kinds(&thread_id), vec![EventKind::ThreadCreated]);
-    assert!(adapter.calls().is_empty());
+    assert_eq!(adapter.calls(), Vec::<&str>::new());
 }
 
 #[test]
@@ -1117,7 +1117,7 @@ fn attach_without_a_harness_does_not_call_the_adapter() {
 
     fixture.service().attach(&thread_id, &adapter).unwrap();
 
-    assert!(adapter.calls().is_empty());
+    assert_eq!(adapter.calls(), Vec::<&str>::new());
 }
 
 #[test]

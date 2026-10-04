@@ -201,7 +201,7 @@ mod tests {
                 None,
             ),
         ];
-        assert!(files_touched(&events, "/w").is_empty());
+        assert_eq!(files_touched(&events, "/w"), Vec::<String>::new());
     }
 
     #[test]

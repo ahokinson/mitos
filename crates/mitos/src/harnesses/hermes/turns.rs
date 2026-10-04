@@ -677,7 +677,7 @@ mod tests {
         });
         let events = run_plain(&mut silent, None);
         assert_eq!(events.last().unwrap().content.as_deref(), Some(EXITED));
-        assert!(!quiet.methods().is_empty());
+        assert_ne!(quiet.methods(), Vec::<String>::new());
     }
 
     #[test]

@@ -72,7 +72,7 @@ mod tests {
     fn resumes_a_linked_session_and_never_takes_the_context_as_an_arg() {
         let fresh = launch(None);
         assert_eq!(fresh.program, "hermes");
-        assert!(fresh.args.is_empty());
+        assert_eq!(fresh.args, Vec::<String>::new());
         assert_eq!(fresh.native_session, None);
         let resumed = launch(Some(json!("sess-1")));
         assert_eq!(resumed.args, ["--resume", "sess-1", "--no-restore-cwd"]);
@@ -83,7 +83,7 @@ mod tests {
     fn is_headless_and_build_only_so_plan_reassignment_is_refused() {
         let capabilities = HermesAdapter.negotiate(HarnessKind::Hermes).unwrap();
         assert!(capabilities.headless);
-        assert!(capabilities.modes.is_empty());
+        assert_eq!(capabilities.modes, []);
         assert!(capabilities.ask_back);
     }
 }

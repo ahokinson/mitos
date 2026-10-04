@@ -237,7 +237,7 @@ mod tests {
         let dir = scratch_dir();
         let path = settings(&dir, "{ not json");
 
-        assert!(!status(&path).problems.is_empty());
+        assert_ne!(status(&path).problems, Vec::<String>::new());
         let outcome = init(&path);
 
         assert_eq!(outcome.result, InitResult::Skipped);

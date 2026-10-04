@@ -215,13 +215,16 @@ mod tests {
             "name": "Edit",
             "input": { "file_path": "/p/a.ts", "old_string": "x", "new_string": "y" }
         });
-        assert!(payload_diffs(&tool_use).is_empty());
-        assert!(payload_diffs(&json!({ "type": "tool_result", "content": "ok" })).is_empty());
+        assert_eq!(payload_diffs(&tool_use), []);
+        assert_eq!(
+            payload_diffs(&json!({ "type": "tool_result", "content": "ok" })),
+            []
+        );
         let shell = json!({
             "type": "tool_result",
             "tool_use_result": { "stdout": "a", "stderr": "" }
         });
-        assert!(payload_diffs(&shell).is_empty());
+        assert_eq!(payload_diffs(&shell), []);
     }
 
     #[test]
@@ -284,7 +287,7 @@ mod tests {
             "tool": "bash",
             "state": { "input": { "command": "ls" } }
         });
-        assert!(payload_diffs(&shell).is_empty());
+        assert_eq!(payload_diffs(&shell), []);
     }
 
     #[test]
@@ -303,7 +306,7 @@ mod tests {
     #[test]
     fn unrecognised_payloads_yield_nothing() {
         for payload in [json!(null), json!("text"), json!([]), json!({})] {
-            assert!(payload_diffs(&payload).is_empty());
+            assert_eq!(payload_diffs(&payload), []);
         }
     }
 }
