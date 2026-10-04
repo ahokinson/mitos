@@ -5,7 +5,7 @@ import type { ThreadEventsState } from "@session/events.ts"
 import type { FeedbackState } from "@commands/feedbackLines.ts"
 import type { HarnessRequest } from "@session/requests.ts"
 import type { Thread, ThreadListState } from "@session/threads.ts"
-import type { UsageSnapshot } from "@database/databases.ts"
+import type { UsageSnapshot } from "@database/views.ts"
 import type { FocusRing } from "@input/focusRings.ts"
 
 /** Shared state behind the layout tree's widgets — they pull what they

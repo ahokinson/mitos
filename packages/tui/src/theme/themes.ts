@@ -19,6 +19,7 @@ export type Theme = {
   text?: string;
   textMuted?: string;
   textDim?: string;
+  diffText?: string;
   accent?: string;
   success?: string;
   warning?: string;

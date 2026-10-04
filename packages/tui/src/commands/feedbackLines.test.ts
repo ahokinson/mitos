@@ -86,9 +86,9 @@ test("mergeFeed interleaves real events and feedback lines by timestamp", () => 
   ];
   const merged = mergeFeed(events, feedbackLines, "t1");
   expect(merged.map((item) => item.kind)).toEqual([
-    "event",
-    "feedback",
-    "event",
+    FeedItemKind.Event,
+    FeedItemKind.Feedback,
+    FeedItemKind.Event,
   ]);
 });
 

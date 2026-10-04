@@ -1,7 +1,9 @@
-import { For, Show } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 
 import type { PaneStyle } from "@layout/trees.ts";
-import { accumulateAssistantDeltas, isDisplayEvent } from "@session/events.ts";
+import { eventDiffs } from "@session/diffs.ts";
+import { EventKind, type ThreadEvent, accumulateAssistantDeltas, isDisplayEvent } from "@session/events.ts";
+import { foldedCallIds, isQuietResult, toolUseId } from "@session/tools.ts";
 import { FeedItemKind, type FeedItem, mergeFeed } from "@commands/feedbackLines.ts";
 import { ThreadMode } from "@session/threads.ts";
 import { useAppState } from "@app/states.tsx";
@@ -9,7 +11,7 @@ import { Chrome } from "@theme/themes.ts";
 import { useTheme } from "@theme/providers.tsx";
 import { CommandSuggestions } from "@widgets/conversation/suggestionLists.tsx";
 import { Composer } from "@widgets/conversation/composers.tsx";
-import { EventRow } from "@widgets/conversation/eventRows.tsx";
+import { EventRow, isToolEvent } from "@widgets/conversation/eventRows.tsx";
 import { FeedbackLineRow } from "@widgets/conversation/feedbackRows.tsx";
 import { WorkingIndicator } from "@widgets/conversation/workingIndicators.tsx";
 
@@ -27,6 +29,7 @@ export function ThreadViewWidget(props: { paneStyle?: PaneStyle; focusId: string
     useAppState();
   const theme = useTheme();
   const realEvents = () => accumulateAssistantDeltas(events.events().filter(isDisplayEvent));
+  const folded = createMemo(() => foldedCallIds(realEvents()));
   const feed = (): FeedItem[] => mergeFeed(realEvents(), feedback.lines(), selected()?.id ?? null);
   const isFocused = () => focusRing.current() === props.focusId;
 
@@ -42,7 +45,23 @@ export function ThreadViewWidget(props: { paneStyle?: PaneStyle; focusId: string
     >
       <Show when={selected() !== null || feed().length > 0} fallback={<EmptyConversation />}>
         <scrollbox width="100%" flexGrow={1} flexShrink={1} minHeight={0} stickyScroll stickyStart="bottom" contentOptions={{ width: "100%" }}>
-          <For each={feed()}>{(item) => (item.kind === FeedItemKind.Event ? <EventRow event={item.event} /> : <FeedbackLineRow feedback={item.feedback} />)}</For>
+          <For each={feed()}>
+            {(item, index) => {
+              if (item.kind !== FeedItemKind.Event) return <FeedbackLineRow feedback={item.feedback} />;
+              const isFolded = (event: ThreadEvent) => event.kind === EventKind.ToolCall && folded().has(toolUseId(event) ?? "");
+              const isHidden = (candidate: FeedItem | undefined) =>
+                candidate?.kind === FeedItemKind.Event &&
+                (isFolded(candidate.event) ||
+                  (candidate.event.kind === EventKind.ToolResult && isQuietResult(candidate.event) && eventDiffs(candidate.event).length === 0));
+              const grouped = () => {
+                let at = index() - 1;
+                while (at >= 0 && isHidden(feed()[at])) at--;
+                const before = feed()[at];
+                return before?.kind === FeedItemKind.Event && isToolEvent(before.event) && isToolEvent(item.event);
+              };
+              return <EventRow event={item.event} grouped={grouped()} folded={isFolded(item.event)} />;
+            }}
+          </For>
           <Show when={working()}>
             <WorkingIndicator awaitingAnswer={pendingRequests().length > 0} />
           </Show>

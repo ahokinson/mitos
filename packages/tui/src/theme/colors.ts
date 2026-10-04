@@ -79,3 +79,14 @@ export function approximateRgb(token: string): RGBTriplet {
   const [r, g, b] = RGBA.fromHex(token).toInts();
   return [r, g, b];
 }
+
+/** `fg` mixed into `bg` at `alpha` (0-1), as a hex color. */
+export function blend(fg: string, bg: string, alpha: number): string {
+  const top = approximateRgb(fg);
+  const bottom = approximateRgb(bg);
+  const channel = (i: 0 | 1 | 2) =>
+    Math.round(bottom[i] + (top[i] - bottom[i]) * alpha)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${channel(0)}${channel(1)}${channel(2)}`;
+}

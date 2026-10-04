@@ -43,7 +43,8 @@ CREATE TABLE thread_events (
         'tool_call', 'tool_result', 'status', 'usage', 'error',
         'note', 'decision', 'question',
         'request_opened', 'request_answered', 'mode_changed',
-        'thread_created', 'harness_bound', 'harness_unbound', 'handoff_carryover'
+        'thread_created', 'harness_bound', 'harness_unbound', 'handoff_carryover',
+        'compaction'
     )),
     role TEXT,
     content TEXT,

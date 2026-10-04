@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 use serde_json::Value;
 
+use super::versions::PROTOCOL_VERSION;
 use crate::domain::ThreadMode;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -35,6 +36,19 @@ pub struct LaunchPlan {
     pub native_session: Option<Value>,
 }
 
+impl LaunchPlan {
+    pub fn new(program: &str, args: Vec<String>, native_session: Option<Value>) -> Self {
+        Self {
+            protocol_version: PROTOCOL_VERSION,
+            kind: "launch".into(),
+            program: program.into(),
+            args,
+            env: BTreeMap::new(),
+            native_session,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CollectedHandoff {
     pub protocol_version: u32,
@@ -45,19 +59,35 @@ pub struct CollectedHandoff {
     pub usage: Option<CollectedUsage>,
 }
 
+impl CollectedHandoff {
+    pub fn new(
+        native_session: Option<Value>,
+        transcript: Option<CollectedTranscript>,
+        usage: Option<CollectedUsage>,
+    ) -> Self {
+        Self {
+            protocol_version: PROTOCOL_VERSION,
+            kind: "handoff".into(),
+            native_session,
+            transcript,
+            usage,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CollectedTranscript {
     #[serde(default)]
     pub messages: Vec<CollectedMessage>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct CollectedMessage {
     pub role: String,
     pub text: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct CollectedUsage {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,

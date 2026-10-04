@@ -98,7 +98,7 @@ function deleteSuggestions(
   ctx: SuggestContext,
 ): CommandSuggestion[] {
   if (!ctx.pendingDeleteId)
-    return threadSuggestions("delete", prefix, ctx.threads);
+    return threadSuggestions("delete", prefix, ctx.threads, true);
   const idPrefix = ctx.pendingDeleteId.slice(0, 8);
   const candidates: CommandSuggestion[] = [
     {
@@ -128,6 +128,19 @@ const ARGUMENT_SUGGESTERS: Record<
     threadSuggestions("resume", prefix, ctx.threads, true),
   archive: (prefix, ctx) => threadSuggestions("archive", prefix, ctx.threads),
   delete: deleteSuggestions,
+  compact: (prefix) =>
+    [
+      {
+        label: "mechanical",
+        insertText: "/compact mechanical",
+        hint: "Trim older history, no model call",
+      },
+      {
+        label: "intelligent",
+        insertText: "/compact intelligent",
+        hint: "Have the harness summarize first",
+      },
+    ].filter((item) => item.label.startsWith(prefix.toLowerCase())),
   mode: (prefix) =>
     [
       {

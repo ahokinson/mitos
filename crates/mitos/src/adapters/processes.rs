@@ -43,7 +43,7 @@ impl ExternalAdapter {
         request: &impl Serialize,
         keep_stdin: bool,
     ) -> Result<(Child, Option<ChildStdin>)> {
-        let mut child = resolvers::adapter_command(harness, self.adapter_dir.as_deref())?
+        let mut child = resolvers::adapter_command(harness, self.adapter_dir.as_deref())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -76,7 +76,11 @@ impl ExternalAdapter {
         let (mut child, stdin) = self.spawn(harness, request, answers.is_some())?;
         let stdout = child.stdout.take().context("adapter stdout unavailable")?;
         let listener = match (answers, stdin) {
-            (Some(path), Some(stdin)) => Some(AnswerListener::start(path, stdin)?),
+            (Some(path), Some(mut stdin)) => Some(AnswerListener::start(path, move |answer| {
+                writeln!(stdin, "{answer}")?;
+                stdin.flush()?;
+                Ok(())
+            })?),
             _ => None,
         };
         let native_session = dispatch_ndjson(BufReader::new(stdout), on_event)?;

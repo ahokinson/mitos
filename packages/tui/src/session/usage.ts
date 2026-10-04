@@ -1,4 +1,4 @@
-import { latestUsage, pendingRequests } from "@database/databases.ts";
+import { latestUsage, pendingRequests } from "@database/views.ts";
 import type { Thread } from "@session/threads.ts";
 import { createMemo, createSignal } from "solid-js";
 

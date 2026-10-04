@@ -3,16 +3,15 @@ use std::io::BufRead;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
+use super::emitters::Emitter;
 use crate::ports::EventSink;
 use crate::wire::events::AdapterEvent;
-
-const TERMINAL_EVENTS: [&str; 2] = ["turn_complete", "error"];
 
 pub fn dispatch_ndjson(
     reader: impl BufRead,
     on_event: &mut EventSink<'_>,
 ) -> Result<Option<Value>> {
-    let mut latest_native_session = None;
+    let mut emitter = Emitter::new(on_event);
     for line in reader.lines() {
         let line = line.context("could not read adapter output")?;
         if line.trim().is_empty() {
@@ -20,16 +19,12 @@ pub fn dispatch_ndjson(
         }
         let event: AdapterEvent = serde_json::from_str(&line)
             .with_context(|| format!("adapter emitted invalid event JSON: {line}"))?;
-        if event.native_session.is_some() {
-            latest_native_session.clone_from(&event.native_session);
-        }
-        let terminal = TERMINAL_EVENTS.contains(&event.event.as_str());
-        on_event(event)?;
-        if terminal {
+        emitter.emit(event)?;
+        if emitter.finished() {
             break;
         }
     }
-    Ok(latest_native_session)
+    Ok(emitter.into_native_session())
 }
 
 #[cfg(test)]

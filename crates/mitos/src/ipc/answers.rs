@@ -18,14 +18,20 @@ pub struct AnswerListener {
 
 impl AnswerListener {
     #[cfg(unix)]
-    pub fn start(path: &Path, stdin: std::process::ChildStdin) -> Result<Self> {
+    pub fn start(
+        path: &Path,
+        on_answer: impl FnMut(Value) -> Result<()> + Send + 'static,
+    ) -> Result<Self> {
         Ok(Self {
-            _inner: unix::Listener::start(path, stdin)?,
+            _inner: unix::Listener::start(path, on_answer)?,
         })
     }
 
     #[cfg(not(unix))]
-    pub fn start(_path: &Path, _stdin: std::process::ChildStdin) -> Result<Self> {
+    pub fn start(
+        _path: &Path,
+        _on_answer: impl FnMut(Value) -> Result<()> + Send + 'static,
+    ) -> Result<Self> {
         anyhow::bail!("answering a running turn requires unix sockets")
     }
 }
@@ -45,7 +51,6 @@ mod unix {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
-    use std::process::ChildStdin;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread::{self, JoinHandle};
@@ -64,7 +69,10 @@ mod unix {
     }
 
     impl Listener {
-        pub fn start(path: &Path, mut stdin: ChildStdin) -> Result<Self> {
+        pub fn start(
+            path: &Path,
+            mut on_answer: impl FnMut(Value) -> Result<()> + Send + 'static,
+        ) -> Result<Self> {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -78,7 +86,7 @@ mod unix {
                 while !stop_flag.load(Ordering::Relaxed) {
                     match listener.accept() {
                         Ok((stream, _)) => {
-                            let _ = forward(stream, &mut stdin);
+                            let _ = forward(stream, &mut on_answer);
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                             thread::sleep(POLL_INTERVAL);
@@ -105,7 +113,7 @@ mod unix {
         }
     }
 
-    fn forward(stream: UnixStream, stdin: &mut ChildStdin) -> Result<()> {
+    fn forward(stream: UnixStream, on_answer: &mut impl FnMut(Value) -> Result<()>) -> Result<()> {
         stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(IO_TIMEOUT))?;
         let mut reader = BufReader::new(stream.try_clone()?);
@@ -117,8 +125,7 @@ mod unix {
             writer.write_all(b"invalid\n")?;
             return Ok(());
         }
-        writeln!(stdin, "{parsed}")?;
-        stdin.flush()?;
+        on_answer(parsed)?;
         writer.write_all(b"ok\n")?;
         Ok(())
     }
@@ -141,7 +148,7 @@ mod unix {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Write};
     use std::process::{Command, Stdio};
 
     use super::*;
@@ -161,7 +168,13 @@ mod tests {
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
-        let listener = AnswerListener::start(&path, child.stdin.take().unwrap()).unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        let listener = AnswerListener::start(&path, move |answer| {
+            writeln!(stdin, "{answer}")?;
+            stdin.flush()?;
+            Ok(())
+        })
+        .unwrap();
 
         send_answer(
             &path,

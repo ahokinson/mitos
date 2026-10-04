@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 
-import type { UsageSnapshot } from "@database/databases.ts";
+import type { UsageSnapshot } from "@database/views.ts";
 import { type Thread, ThreadStatus } from "@session/threads.ts";
 import { Tone } from "@theme/themes.ts";
 
@@ -26,11 +26,11 @@ function formatTimestamp(iso: string): string {
 function statusTone(status: ThreadStatus): Tone {
   switch (status) {
     case ThreadStatus.Active:
-      return "success";
+      return Tone.Success;
     case ThreadStatus.Paused:
-      return "warning";
+      return Tone.Warning;
     case ThreadStatus.Archived:
-      return "dim";
+      return Tone.Dim;
   }
 }
 

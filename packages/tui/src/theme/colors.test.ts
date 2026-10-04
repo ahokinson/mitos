@@ -4,6 +4,7 @@ import { RGBA } from "@opentui/core";
 import {
   ansiIndex,
   approximateRgb,
+  blend,
   ColorRole,
   isColorToken,
   toColor,
@@ -66,4 +67,10 @@ test("approximate rgb gives gradients real channels for every token form", () =>
     approximateRgb("ansi:2")[0],
   );
   expect(approximateRgb("default")).toHaveLength(3);
+});
+
+test("blend mixes a foreground into a background by alpha", () => {
+  expect(blend("#ffffff", "#000000", 0)).toBe("#000000");
+  expect(blend("#ffffff", "#000000", 1)).toBe("#ffffff");
+  expect(blend("#ff0000", "#000000", 0.5)).toBe("#800000");
 });

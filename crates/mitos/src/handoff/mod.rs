@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::domain::ThreadEvent;
 
 pub use bounds::bounded_context;
-pub use renderers::DeterministicRenderer;
+pub use renderers::{DeterministicRenderer, PREAMBLE_PREFIX};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct HandoffFacts {

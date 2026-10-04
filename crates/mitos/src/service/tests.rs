@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 
 use super::ThreadService;
-use crate::domain::{EventKind, RequestStatus, ThreadMode, ThreadStatus, id};
+use crate::domain::{CompactMode, EventKind, RequestStatus, ThreadMode, ThreadStatus, id};
 use crate::handoff::DeterministicRenderer;
 use crate::ports::{EventSink, HarnessAdapter};
 use crate::store::Store;
@@ -487,6 +487,117 @@ fn reassign_skips_collection_when_there_is_no_native_session() {
             .as_deref(),
         Some("codex")
     );
+}
+
+#[test]
+fn mechanical_compact_rebinds_the_same_harness_with_a_fresh_session() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(Some("claude"));
+    fixture
+        .store
+        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
+        .unwrap();
+    let mut adapter = FakeAdapter::new();
+    adapter.handoff = Some(handoff_with(&[("user", "hi")], &json!("old")));
+
+    fixture
+        .service()
+        .compact_thread(&thread_id, CompactMode::Mechanical, &adapter)
+        .unwrap();
+
+    let thread = fixture.store.get_thread(&thread_id).unwrap();
+    assert_eq!(thread.active_harness.as_deref(), Some("claude"));
+    assert_eq!(thread.native_session, None);
+    assert!(!adapter.calls().contains(&"send_message"));
+    assert!(!fixture.kinds(&thread_id).contains(&EventKind::Compaction));
+}
+
+#[test]
+fn intelligent_compact_seeds_the_fresh_session_with_the_summary() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(Some("claude"));
+    fixture
+        .store
+        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
+        .unwrap();
+    fixture
+        .store
+        .append_event(
+            &thread_id,
+            crate::domain::NewThreadEvent {
+                role: Some("user".into()),
+                content: Some("an early question".into()),
+                ..crate::domain::NewThreadEvent::new(EventKind::UserMessage)
+            },
+        )
+        .unwrap();
+    let mut adapter = FakeAdapter::new();
+    adapter.handoff = Some(handoff_with(&[], &json!("old")));
+    adapter.send_events = vec![
+        json!({"event": "assistant_message", "role": "assistant", "content": "SUMMARY TEXT"}),
+        json!({"event": "turn_complete"}),
+    ];
+
+    fixture
+        .service()
+        .compact_thread(&thread_id, CompactMode::Intelligent, &adapter)
+        .unwrap();
+
+    let thread = fixture.store.get_thread(&thread_id).unwrap();
+    assert_eq!(thread.active_harness.as_deref(), Some("claude"));
+    assert_eq!(thread.native_session, None);
+    let compaction = fixture
+        .store
+        .events_since(&thread_id, 0)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.kind == EventKind::Compaction)
+        .unwrap();
+    assert_eq!(compaction.content.as_deref(), Some("SUMMARY TEXT"));
+
+    fixture
+        .service()
+        .send(&thread_id, "next question".into(), &adapter)
+        .unwrap();
+    let context = adapter.started_with.borrow().last().cloned().unwrap();
+    assert!(context.contains("SUMMARY TEXT"));
+    assert!(context.contains("next question"));
+    assert!(!context.contains("an early question"));
+}
+
+#[test]
+fn intelligent_compact_leaves_the_binding_when_no_summary_comes_back() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(Some("claude"));
+    fixture
+        .store
+        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
+        .unwrap();
+    let adapter = FakeAdapter::new();
+
+    let error = fixture
+        .service()
+        .compact_thread(&thread_id, CompactMode::Intelligent, &adapter)
+        .unwrap_err();
+
+    assert!(error.to_string().contains("no summary"));
+    let thread = fixture.store.get_thread(&thread_id).unwrap();
+    assert_eq!(thread.native_session, Some(json!("old")));
+    assert!(!fixture.kinds(&thread_id).contains(&EventKind::Compaction));
+}
+
+#[test]
+fn compact_requires_a_bound_harness() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(None);
+    let adapter = FakeAdapter::new();
+
+    let error = fixture
+        .service()
+        .compact_thread(&thread_id, CompactMode::Mechanical, &adapter)
+        .unwrap_err();
+
+    assert!(error.to_string().contains("no harness"));
 }
 
 #[test]

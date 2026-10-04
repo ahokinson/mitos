@@ -22,6 +22,7 @@ string_enum! {
         HarnessBound => "harness_bound",
         HarnessUnbound => "harness_unbound",
         HandoffCarryover => "handoff_carryover",
+        Compaction => "compaction",
     }
 }
 

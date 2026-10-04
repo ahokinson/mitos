@@ -73,6 +73,6 @@ parseable number renders as an empty, dim bar instead of an error, so you can
 point it at a metric that hasn't reported yet. Ordinary Handlebars
 conditionals (`{{#if usage.harness}}...{{else}}...{{/if}}`) work too. A
 metric with no value is an empty string, which is falsy, so a template can
-branch on whether data has arrived. `usage.hbs` uses all of this: a
-severity-colored context bar, per-rate-limit bars, and a "waiting for
-data"/"not reported" fallback for anything that hasn't reported yet.
+branch on whether data has arrived. `usage.hbs` uses all of this: per-rate-limit
+and context bars that only appear when the harness reports them, thread token
+totals, and a "waiting for data"/"not reported" fallback.

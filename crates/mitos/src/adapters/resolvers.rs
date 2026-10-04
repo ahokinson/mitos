@@ -4,8 +4,6 @@ use std::process::Command;
 
 use anyhow::Result;
 
-const BUNDLED_HARNESSES: [&str; 4] = ["claude", "codex", "hermes", "opencode"];
-
 fn bun_program() -> OsString {
     std::env::var_os("MITOS_BUN").unwrap_or_else(|| "bun".into())
 }
@@ -29,18 +27,11 @@ pub fn tui_command() -> Result<Command> {
     Ok(packaged_command(Path::new("tui/main.mjs"))?.unwrap_or_else(|| Command::new("mitos-tui")))
 }
 
-pub fn adapter_command(harness: &str, adapter_dir: Option<&Path>) -> Result<Command> {
-    if adapter_dir.is_none()
-        && BUNDLED_HARNESSES.contains(&harness)
-        && let Some(command) =
-            packaged_command(&PathBuf::from("adapters").join(format!("{harness}.mjs")))?
-    {
-        return Ok(command);
-    }
+pub fn adapter_command(harness: &str, adapter_dir: Option<&Path>) -> Command {
     let (executable, args) = external_adapter_command(harness, adapter_dir);
     let mut command = Command::new(executable);
     command.args(args);
-    Ok(command)
+    command
 }
 
 fn external_adapter_command(harness: &str, adapter_dir: Option<&Path>) -> (PathBuf, Vec<OsString>) {
@@ -115,15 +106,5 @@ mod tests {
         assert_eq!(args, vec![source.into_os_string()]);
 
         std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn supported_harnesses_use_bundled_adapters() {
-        for harness in ["claude", "codex", "hermes", "opencode"] {
-            assert!(
-                BUNDLED_HARNESSES.contains(&harness),
-                "{harness} should be bundled"
-            );
-        }
     }
 }

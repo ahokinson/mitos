@@ -3,6 +3,7 @@ import type { ThreadEventsState } from "@session/events.ts";
 import type {
   answerRequest,
   archiveThread,
+  compactThread,
   deleteThread,
   hooksInit,
   hooksStatus,
@@ -36,6 +37,7 @@ export type CommandContext = {
   mutations: {
     reassignHarness: typeof reassignHarness;
     archiveThread: typeof archiveThread;
+    compactThread: typeof compactThread;
     deleteThread: typeof deleteThread;
     noteThread: typeof noteThread;
     setMode: typeof setMode;

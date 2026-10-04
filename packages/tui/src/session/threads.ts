@@ -1,4 +1,4 @@
-import { listThreads } from "@database/databases.ts";
+import { listThreads } from "@database/views.ts";
 import { createSignal } from "solid-js";
 
 export enum ThreadStatus {
@@ -10,6 +10,11 @@ export enum ThreadStatus {
 export enum ThreadMode {
   Plan = "plan",
   Build = "build",
+}
+
+export enum CompactMode {
+  Mechanical = "mechanical",
+  Intelligent = "intelligent",
 }
 
 export type Thread = {

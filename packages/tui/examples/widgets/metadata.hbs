@@ -1,7 +1,7 @@
-{{#color "accent"}}{{harness}}{{/color}}
-
-# {{#gradient "accent" "err"}}{{thread.id}}{{/gradient}}  {{thread.status}}
-· created {{thread.created}}
-· updated {{thread.updated}}
+{{#color "accent"}}{{harness}}{{/color}}  {{thread.status}}
+{{#color "textDim"}}────────────────────────{{/color}}
+{{#color "textDim"}}thread{{/color}}     {{#gradient "accent" "err"}}{{thread.id}}{{/gradient}}
+{{#color "textDim"}}created{{/color}}    {{thread.created}}
+{{#color "textDim"}}updated{{/color}}    {{thread.updated}}
 
 ⌂ {{workspace}}

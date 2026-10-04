@@ -10,6 +10,7 @@ mod requests;
 mod schemas;
 mod threads;
 mod usage;
+mod views;
 mod workspaces;
 
 use std::fs;

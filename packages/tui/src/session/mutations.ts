@@ -1,34 +1,8 @@
+import { run, runJson } from "@core/invocations.ts";
 import type { HookInitOutcome, HookStatus } from "@session/hooks.ts";
-import type { Thread, ThreadMode } from "@session/threads.ts";
+import type { CompactMode, Thread, ThreadMode } from "@session/threads.ts";
 
-/** Path/name of the Mitos core binary the TUI drives. Set by bare `mitos`
- * (see `crates/mitos/src/cli/launchers.rs::launch_tui`) to the exact executable that
- * launched this process; falls back to resolving "mitos" on PATH for
- * standalone/dev invocations. Mutations only — reads go through
- * `@database/databases.ts`'s direct `bun:sqlite` access instead. */
-const core = process.env.MITOS_CORE ?? "mitos";
-
-async function run(
-  args: string[],
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const process = Bun.spawn([core, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    process.exited,
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-  ]);
-  return { exitCode, stdout, stderr };
-}
-
-async function runJson<T>(args: string[]): Promise<T> {
-  const { exitCode, stdout, stderr } = await run([...args, "--json"]);
-  if (exitCode !== 0)
-    throw new Error(stderr.trim() || stdout.trim() || "Mitos command failed");
-  return JSON.parse(stdout) as T;
-}
+/** Changes to Mitos state. Reads go through `@database/views.ts`. */
 
 export function createThread(harness: string | null): Promise<Thread> {
   const args = ["thread", "new"];
@@ -96,6 +70,23 @@ export async function deleteThread(threadId: string): Promise<void> {
   if (exitCode !== 0)
     throw new Error(
       stderr.trim() || stdout.trim() || "Could not delete thread",
+    );
+}
+
+export async function compactThread(
+  threadId: string,
+  mode: CompactMode,
+): Promise<void> {
+  const { exitCode, stdout, stderr } = await run([
+    "thread",
+    "compact",
+    threadId,
+    "--mode",
+    mode,
+  ]);
+  if (exitCode !== 0)
+    throw new Error(
+      stderr.trim() || stdout.trim() || "Could not compact thread",
     );
 }
 

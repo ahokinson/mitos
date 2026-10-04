@@ -5,12 +5,14 @@ use anyhow::Result;
 use super::{HandoffFacts, HandoffRenderer};
 use crate::domain::{EventKind, ThreadEvent};
 
+pub const PREAMBLE_PREFIX: &str = "You are joining Mitos session ";
+
 pub struct DeterministicRenderer;
 
 impl HandoffRenderer for DeterministicRenderer {
     fn render(&self, facts: &HandoffFacts) -> Result<String> {
         let mut output = format!(
-            "You are joining Mitos session {}. The conversation so far follows; reply to the final user message.\n\n",
+            "{PREAMBLE_PREFIX}{}. The conversation so far follows; reply to the final user message.\n\n",
             facts.thread_id
         );
         append_event_facts(&mut output, &facts.events);
@@ -32,6 +34,7 @@ fn append_event_facts(output: &mut String, events: &[ThreadEvent]) {
                 "- Note from {}: {content}",
                 event.harness.as_deref().unwrap_or("Mitos")
             ),
+            EventKind::Compaction => format!("- Summary of the earlier conversation: {content}"),
             EventKind::Decision => format!("- Decision: {content}"),
             EventKind::Question => format!("- Open question: {content}"),
             EventKind::ToolCall

@@ -3,14 +3,14 @@ use serde_json::Value;
 
 use super::args::{EnterArgs, ThreadCommand};
 use super::outputs::emit;
-use crate::adapters::ExternalAdapter;
+use crate::adapters::Adapters;
 use crate::ports::HarnessRunner;
 use crate::runner::ptys::PtyRunner;
 use crate::service::ThreadService;
 
 pub fn dispatch(
     service: &ThreadService<'_>,
-    adapter: &ExternalAdapter,
+    adapter: &Adapters,
     command: ThreadCommand,
 ) -> Result<()> {
     match command {
@@ -60,6 +60,11 @@ pub fn dispatch(
             println!("Reassigned thread {id} to {to}.");
             Ok(())
         }
+        ThreadCommand::Compact { id, mode } => {
+            service.compact_thread(&id, mode, adapter)?;
+            println!("Compacted thread {id} ({}).", mode.as_str());
+            Ok(())
+        }
         ThreadCommand::Attach { id } => service.attach(&id, adapter),
         ThreadCommand::Archive { id } => {
             service.archive(&id, adapter)?;
@@ -99,11 +104,7 @@ pub fn dispatch(
     }
 }
 
-pub fn enter(
-    service: &ThreadService<'_>,
-    adapter: &ExternalAdapter,
-    args: EnterArgs,
-) -> Result<()> {
+pub fn enter(service: &ThreadService<'_>, adapter: &Adapters, args: EnterArgs) -> Result<()> {
     let harness = args.harness;
     let entry = service.begin_entry(&args.thread, &harness, args.native_session, adapter)?;
     println!(

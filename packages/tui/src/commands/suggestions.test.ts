@@ -139,6 +139,14 @@ test("level 2: typing narrows confirm/cancel by prefix", () => {
   expect(labels(items)).toEqual(["cancel"]);
 });
 
+test("/compact suggests mechanical and intelligent", () => {
+  expect(labels(suggestFor("/compact ", ctx()))).toEqual([
+    "mechanical",
+    "intelligent",
+  ]);
+  expect(labels(suggestFor("/compact in", ctx()))).toEqual(["intelligent"]);
+});
+
 test("/mode suggests plan and build", () => {
   expect(labels(suggestFor("/mode ", ctx()))).toEqual(["plan", "build"]);
   expect(labels(suggestFor("/mode pl", ctx()))).toEqual(["plan"]);
@@ -187,7 +195,11 @@ test("/hooks status takes no harness arguments", () => {
   expect(suggestFor("/hooks status ", ctx())).toEqual([]);
 });
 
-test("/archive and /delete stay quiet on an empty argument", () => {
+test("/archive stays quiet on an empty argument", () => {
   expect(suggestFor("/archive ", ctx())).toEqual([]);
-  expect(suggestFor("/delete ", ctx())).toEqual([]);
+});
+
+test("/delete with nothing typed lists every thread, like /resume", () => {
+  expect(suggestFor("/delete ", ctx())).toEqual(suggestFor("/resume ", ctx()).map((item) => ({ ...item, insertText: item.insertText.replace("/resume", "/delete") })));
+  expect(suggestFor("/delete ", ctx()).length).toBeGreaterThan(0);
 });

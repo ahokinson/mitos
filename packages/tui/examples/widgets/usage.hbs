@@ -1,19 +1,32 @@
 {{#color "accent"}}▍ usage{{/color}}{{#if usage.harness}} · {{usage.harness}}{{/if}}
 {{#color "textDim"}}────────────────────────{{/color}}
 {{#if usage.harness}}
+{{#if usage.plan_5h}}
 {{#color "textDim"}}Current session{{/color}}
-{{#if usage.plan_5h}}{{bar usage.plan_5h 24}} {{#gradient "success" "warning" "err"}}{{usage.plan_5h}}{{/gradient}}
-{{#color "textDim"}}resets {{usage.plan_5h_resets}} · in {{usage.plan_5h_remaining}}{{/color}}{{else}}{{#color "textDim"}}not reported{{/color}}{{/if}}
+{{bar usage.plan_5h 24}} {{#gradient "success" "warning" "err"}}{{usage.plan_5h}}{{/gradient}}
+{{#color "textDim"}}resets {{usage.plan_5h_resets}} · in {{usage.plan_5h_remaining}}{{/color}}
 
 {{#color "textDim"}}Current week{{/color}}
-{{#if usage.plan_week}}{{bar usage.plan_week 24}} {{#gradient "success" "warning" "err"}}{{usage.plan_week}}{{/gradient}}
-{{#color "textDim"}}resets {{usage.plan_week_resets}} · in {{usage.plan_week_remaining}}{{/color}}{{else}}{{#color "textDim"}}not reported{{/color}}{{/if}}
+{{bar usage.plan_week 24}} {{#gradient "success" "warning" "err"}}{{usage.plan_week}}{{/gradient}}
+{{#color "textDim"}}resets {{usage.plan_week_resets}} · in {{usage.plan_week_remaining}}{{/color}}
 
+{{/if}}
+{{#if usage.context_percent}}
 {{#color "textDim"}}Context{{/color}}
-{{bar usage.context_percent 24}} {{usage.context_percent}}
+{{bar usage.context_percent 24}} {{#gradient "success" "warning" "err"}}{{usage.context_percent}}{{/gradient}}
+
+{{/if}}
+{{#color "textDim"}}This thread{{/color}}
+in         {{usage.tokens_in}}
+out        {{usage.tokens_out}}
+cached     {{usage.tokens_cached}}
 {{#if usage.cost}}
 cost       {{usage.cost}}
 {{/if}}
+{{#unless usage.plan_5h}}
+
+{{#color "textDim"}}plan limits not reported{{/color}}
+{{/unless}}
 {{else}}
 {{#color "textDim"}}waiting for the first turn to report usage…{{/color}}
 {{/if}}

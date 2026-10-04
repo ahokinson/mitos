@@ -1,5 +1,6 @@
+import { cp } from "node:fs/promises";
 import { join } from "node:path";
-import { adapters, harnesses, root, tui } from "@builds/layouts.ts";
+import { root, tui } from "@builds/layouts.ts";
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin";
 
 export async function bundleSources(): Promise<void> {
@@ -13,17 +14,13 @@ export async function bundleSources(): Promise<void> {
     external: ["@opentui/core"],
     plugins: [createSolidTransformPlugin()],
   });
-  const adapterBundle = await Bun.build({
-    entrypoints: harnesses.map((harness) =>
-      join(root, "packages", "adapters", "src", "entrypoints", `${harness}.ts`),
-    ),
-    outdir: adapters,
-    naming: "[name].mjs",
-    target: "bun",
-  });
-  if (!tuiBundle.success || !adapterBundle.success) {
-    for (const log of [...tuiBundle.logs, ...adapterBundle.logs])
-      console.error(log);
+  await cp(
+    join(root, "packages", "tui", "assets"),
+    join(tui, "assets"),
+    { recursive: true },
+  );
+  if (!tuiBundle.success) {
+    for (const log of tuiBundle.logs) console.error(log);
     process.exit(1);
   }
 }

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 
-use crate::domain::ThreadMode;
+use crate::domain::{CompactMode, ThreadMode};
 use crate::hooks::HARNESSES;
 use crate::service::ThreadNotes;
 
@@ -59,6 +59,31 @@ pub struct HookArgs {
     pub(super) passthrough: bool,
 }
 
+/// Read-only views of stored state for frontends; every view prints JSON.
+#[derive(Debug, Subcommand)]
+pub enum ViewCommand {
+    /// A workspace's threads, newest first, with their opening messages.
+    Threads {
+        #[arg(long)]
+        workspace_key: String,
+    },
+    /// The user messages sent in a workspace, newest first, each text once.
+    History {
+        #[arg(long)]
+        workspace_key: String,
+        #[arg(long)]
+        limit: usize,
+    },
+    /// Whether a thread has recorded nothing beyond its own setup events.
+    Empty { id: String },
+    /// A thread's latest context and cumulative usage under a harness, or null.
+    Usage {
+        id: String,
+        #[arg(long, add = harness_candidates())]
+        harness: String,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 pub enum HooksCommand {
     /// Show whether each harness's hook is installed, approved, and reporting.
@@ -108,6 +133,12 @@ pub enum ThreadCommand {
         id: String,
         #[arg(long = "to")]
         to: String,
+    },
+    /// Rebuild the thread's native session from a trimmed or summarized context.
+    Compact {
+        id: String,
+        #[arg(long, default_value = "mechanical")]
+        mode: CompactMode,
     },
     Attach {
         id: String,

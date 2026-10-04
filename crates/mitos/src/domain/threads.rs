@@ -10,12 +10,28 @@ string_enum! {
 }
 
 string_enum! {
+    enum CompactMode("compact mode") {
+        Mechanical => "mechanical",
+        Intelligent => "intelligent",
+    }
+}
+
+string_enum! {
     #[derive(Default)]
     enum ThreadMode("thread mode") {
         Plan => "plan",
         #[default]
         Build => "build",
     }
+}
+
+/// A thread as a frontend lists it.
+#[derive(Clone, Debug, Serialize)]
+pub struct ThreadSummary {
+    #[serde(flatten)]
+    pub thread: Thread,
+    /// The first user message, which gives a thread a human-readable identity.
+    pub opening_message: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

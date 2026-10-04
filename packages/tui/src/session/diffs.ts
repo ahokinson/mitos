@@ -132,7 +132,16 @@ function groupHunks(ops: DiffLine[]): Hunk[] {
       if (op.sign !== Sign.Added) oldStart++;
       if (op.sign !== Sign.Removed) newStart++;
     }
-    return { oldStart, newStart, lines: ops.slice(start, end + 1) };
+    const lines = ops.slice(start, end + 1);
+    const isBlankContext = (line: DiffLine | undefined) =>
+      line?.sign === Sign.Context && line.text.trim() === "";
+    while (isBlankContext(lines[0])) {
+      lines.shift();
+      oldStart++;
+      newStart++;
+    }
+    while (isBlankContext(lines[lines.length - 1])) lines.pop();
+    return { oldStart, newStart, lines };
   });
 }
 
@@ -221,40 +230,47 @@ function diffFromUnified(path: string, body: string): FileDiff | null {
   return fileDiffOf(path, parseUnified(body));
 }
 
-function claudeDiffs(payload: Json): FileDiff[] {
-  const input = asRecord(payload.input);
-  const path = asString(input?.file_path);
-  if (!input || !path) return [];
-  switch (payload.name) {
-    case "Edit": {
-      const diff = diffTexts(
-        path,
-        asString(input.old_string) ?? "",
-        asString(input.new_string) ?? "",
-      );
-      return diff ? [diff] : [];
-    }
-    case "MultiEdit": {
-      const edits = Array.isArray(input.edits) ? input.edits : [];
-      const hunks = edits.flatMap((edit) => {
-        const record = asRecord(edit);
-        return groupHunks(
-          lineOps(
-            splitLines(asString(record?.old_string) ?? ""),
-            splitLines(asString(record?.new_string) ?? ""),
-          ),
+function claudeResultDiffs(payload: Json): FileDiff[] {
+  const result = asRecord(payload.tool_use_result);
+  const path = asString(result?.filePath);
+  if (!result || !path) return [];
+  const patch = Array.isArray(result.structuredPatch)
+    ? result.structuredPatch
+    : [];
+  const hunks = patch.flatMap((entry): Hunk[] => {
+    const record = asRecord(entry);
+    if (!record || !Array.isArray(record.lines)) return [];
+    const lines = record.lines.flatMap((raw): DiffLine[] => {
+      if (typeof raw !== "string") return [];
+      const sign = raw[0];
+      return sign === Sign.Added ||
+        sign === Sign.Removed ||
+        sign === Sign.Context
+        ? [{ sign, text: raw.slice(1) }]
+        : [];
+    });
+    return lines.length === 0
+      ? []
+      : [
+          {
+            oldStart: Number(record.oldStart) || 1,
+            newStart: Number(record.newStart) || 1,
+            lines,
+          },
+        ];
+  });
+  const fromPatch = fileDiffOf(path, hunks);
+  if (fromPatch) return [fromPatch];
+  const created = asString(result.content);
+  const diff =
+    result.type === "create" && created !== undefined
+      ? diffTexts(path, "", created)
+      : diffTexts(
+          path,
+          asString(result.oldString) ?? "",
+          asString(result.newString) ?? "",
         );
-      });
-      const diff = fileDiffOf(path, hunks);
-      return diff ? [diff] : [];
-    }
-    case "Write": {
-      const diff = diffTexts(path, "", asString(input.content) ?? "");
-      return diff ? [diff] : [];
-    }
-    default:
-      return [];
-  }
+  return diff ? [diff] : [];
 }
 
 function codexDiffs(payload: Json): FileDiff[] {
@@ -318,7 +334,8 @@ function hermesDiffs(payload: Json): FileDiff[] {
 export function payloadDiffs(payload: unknown): FileDiff[] {
   const record = asRecord(payload);
   if (!record) return [];
-  if (record.type === "tool_use") return claudeDiffs(record);
+  if (record.type === "tool_use") return [];
+  if (record.type === "tool_result") return claudeResultDiffs(record);
   if (record.type === "fileChange") return codexDiffs(record);
   if (record.type === "tool") return opencodeDiffs(record);
   return hermesDiffs(record);

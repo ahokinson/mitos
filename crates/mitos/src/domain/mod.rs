@@ -18,8 +18,8 @@ pub use events::{EventKind, NewThreadEvent, ThreadEvent};
 pub use hooks::{HookLastSeen, Observation, PlanWindows};
 pub use ids::{id, now};
 pub use requests::{HarnessRequest, RequestKind, RequestStatus};
-pub use threads::{Thread, ThreadMode, ThreadStatus};
+pub use threads::{CompactMode, Thread, ThreadMode, ThreadStatus, ThreadSummary};
 #[cfg(test)]
 pub use usage::HarnessPlanUsage;
-pub use usage::UsageSnapshot;
+pub use usage::{ThreadUsage, UsageSnapshot};
 pub use workspaces::Workspace;

@@ -15,9 +15,16 @@ type RecordedMessages = HashMap<(&'static str, String), usize>;
 
 impl ThreadService<'_> {
     pub(super) fn render_handoff(&self, thread: &Thread) -> Result<String> {
+        let mut events = self.store.events_since(&thread.id, 0)?;
+        if let Some(start) = events
+            .iter()
+            .rposition(|event| event.kind == EventKind::Compaction)
+        {
+            events.drain(..start);
+        }
         let facts = HandoffFacts {
             thread_id: thread.id.clone(),
-            events: self.store.events_since(&thread.id, 0)?,
+            events,
         };
         Ok(bounded_context(
             self.renderer.render(&facts)?,

@@ -5,7 +5,7 @@ import { RGBA } from "@opentui/core"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import type { UsageSnapshot } from "@database/databases.ts"
+import type { UsageSnapshot } from "@database/views.ts"
 import { TextAlign } from "@layout/trees.ts"
 import { TemplateWidget } from "@widgets/custom/customWidgets.tsx"
 import { AppStateProvider } from "@app/states.tsx"
@@ -202,6 +202,15 @@ test("the usage example shows rounded limit percents with reset times", async ()
   expect(frame).toContain("63%")
   expect(frame).toMatch(/resets \d{1,2}:\d{2}(am|pm)/)
   expect(frame).not.toContain("not reported")
+})
+
+test("the usage example hides context when the harness reports no limit", async () => {
+  const frame = await render(usageExample, "/tmp/workspace", {
+    ...exampleUsage,
+    context_limit_tokens: null,
+  })
+  expect(frame).not.toContain("Context")
+  expect(frame).toContain("This thread")
 })
 
 test("the usage and limits examples fall back when limits are unreported", async () => {

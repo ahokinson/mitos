@@ -8,6 +8,7 @@ mod tests;
 mod threads;
 mod turns;
 mod usage;
+mod views;
 
 use crate::config::handoff_max_inline_bytes;
 use crate::handoff::HandoffRenderer;

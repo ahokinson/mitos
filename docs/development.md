@@ -11,8 +11,11 @@ For source-based development:
 MITOS_SOURCE=/path/to/mitos
 cd /path/to/workspace
 MITOS_TUI=$MITOS_SOURCE/packages/tui/src/app/entries.tsx \
-MITOS_ADAPTER_DIR=$MITOS_SOURCE/packages/adapters/src/entrypoints \
 $MITOS_SOURCE/target/debug/mitos
 ```
 
-Release builds put the Bun TUI and adapters beside the Rust executable.
+The harness adapters are part of the Rust binary. `MITOS_ADAPTER_DIR` (or
+`--adapter-dir`) points at a directory of external adapters instead, one
+`mitos-<harness>` executable per harness, which replaces the built-in ones.
+
+Release builds put the Bun TUI beside the Rust executable.

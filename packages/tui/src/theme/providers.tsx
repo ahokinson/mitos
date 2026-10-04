@@ -1,8 +1,9 @@
-import type { ColorInput } from "@opentui/core"
-import { type ParentProps, createContext, useContext } from "solid-js"
+import type { ColorInput, SyntaxStyle } from "@opentui/core"
+import { type ParentProps, createContext, createMemo, onCleanup, useContext } from "solid-js"
 
 import { ColorRole, toColor } from "@theme/colors.ts"
 import { defaultTheme } from "@theme/palettes.ts"
+import { syntaxStyleFor } from "@theme/syntaxes.ts"
 import type { Chrome, Theme } from "@theme/themes.ts"
 
 /** A theme as the renderer takes it: palette and default tokens are already
@@ -30,16 +31,23 @@ export function renderTheme(theme: Theme): RenderTheme {
   ) as RenderTheme
 }
 
-type ThemeValue = { tokens: Theme; render: RenderTheme }
+type ThemeValue = { tokens: Theme; render: RenderTheme; syntax: SyntaxStyle }
 
 function themeValue(theme: Theme): ThemeValue {
-  return { tokens: theme, render: renderTheme(theme) }
+  return { tokens: theme, render: renderTheme(theme), syntax: syntaxStyleFor(theme) }
 }
 
 const ThemeContext = createContext<ThemeValue>(themeValue(defaultTheme))
 
 export function ThemeProvider(props: ParentProps & { theme?: Theme }) {
-  return <ThemeContext.Provider value={themeValue(props.theme ?? defaultTheme)}>{props.children}</ThemeContext.Provider>
+  const value = createMemo(() => themeValue(props.theme ?? defaultTheme))
+  onCleanup(() => value().syntax.destroy())
+  return <ThemeContext.Provider value={value()}>{props.children}</ThemeContext.Provider>
+}
+
+/** Highlight styles for code, diffs and markdown, in the active theme. */
+export function useSyntaxStyle(): SyntaxStyle {
+  return useContext(ThemeContext).syntax
 }
 
 export function useTheme(): RenderTheme {

@@ -1,4 +1,4 @@
-import { syncEvents } from "@database/databases.ts";
+import { syncEvents } from "@database/views.ts";
 import {
   describeRequest,
   type RequestKind,
@@ -27,6 +27,7 @@ export enum EventKind {
   HarnessBound = "harness_bound",
   HarnessUnbound = "harness_unbound",
   HandoffCarryover = "handoff_carryover",
+  Compaction = "compaction",
 }
 
 /** Mirrors `crates/mitos/src/domain/events.rs::ThreadEvent`, snake_case to match

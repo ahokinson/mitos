@@ -20,6 +20,7 @@
       "@app/*": ["src/app/*"],
       "@commands/*": ["src/commands/*"],
       "@config/*": ["src/config/*"],
+      "@core/*": ["src/core/*"],
       "@database/*": ["src/database/*"],
       "@harness/*": ["src/harness/*"],
       "@input/*": ["src/input/*"],

@@ -16,6 +16,7 @@ export function useAppShortcuts(options: {
   focusRing: FocusRing;
   startNewThread: () => void;
   refresh: () => void;
+  quit: () => void;
 }): void {
   const { suggestions, focusRing } = options;
 
@@ -71,6 +72,6 @@ export function useAppShortcuts(options: {
       handle(KeyAction.FocusNext, focusRing.next) ||
       handle(KeyAction.NewSession, options.startNewThread) ||
       handle(KeyAction.Refresh, options.refresh) ||
-      handle(KeyAction.Quit, () => process.exit(0));
+      handle(KeyAction.Quit, options.quit);
   });
 }

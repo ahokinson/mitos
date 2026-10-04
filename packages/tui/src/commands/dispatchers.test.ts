@@ -63,6 +63,7 @@ function createFakeContext(options: {
     Record<
       | "reassignHarness"
       | "archiveThread"
+      | "compactThread"
       | "deleteThread"
       | "noteThread"
       | "setMode"
@@ -130,6 +131,11 @@ function createFakeContext(options: {
         calls.push({ name: "archiveThread", args: [threadId] });
         if (options.failWith?.archiveThread)
           throw options.failWith.archiveThread;
+      },
+      compactThread: async (threadId, mode) => {
+        calls.push({ name: "compactThread", args: [threadId, mode] });
+        if (options.failWith?.compactThread)
+          throw options.failWith.compactThread;
       },
       deleteThread: async (threadId) => {
         calls.push({ name: "deleteThread", args: [threadId] });
@@ -227,6 +233,47 @@ test("/harness reassigns the selected thread and refreshes", async () => {
   ]);
   expect(state.currentHarness).toBe("codex");
   expect(state.refreshed).toBe(1);
+});
+
+test("/compact with no thread selected errors without compacting", async () => {
+  const { ctx, calls, notes } = createFakeContext({ selected: null });
+  await run("/compact", ctx);
+  expect(calls).toEqual([]);
+  expect(notes[0]?.tone).toBe(FeedbackTone.Error);
+});
+
+test("/compact defaults to the mechanical mode and refreshes", async () => {
+  const { ctx, calls, state } = createFakeContext({ selected: CLAUDE_THREAD });
+  await run("/compact", ctx);
+  expect(calls).toEqual([
+    { name: "compactThread", args: [CLAUDE_THREAD.id, "mechanical"] },
+  ]);
+  expect(state.refreshed).toBe(1);
+});
+
+test("/compact intelligent passes the mode through", async () => {
+  const { ctx, calls } = createFakeContext({ selected: CLAUDE_THREAD });
+  await run("/compact intelligent", ctx);
+  expect(calls).toEqual([
+    { name: "compactThread", args: [CLAUDE_THREAD.id, "intelligent"] },
+  ]);
+});
+
+test("/compact rejects an unknown mode", async () => {
+  const { ctx, calls, notes } = createFakeContext({ selected: CLAUDE_THREAD });
+  await run("/compact lossy", ctx);
+  expect(calls).toEqual([]);
+  expect(notes[0]?.tone).toBe(FeedbackTone.Error);
+});
+
+test("/compact surfaces a failure as an error note without throwing", async () => {
+  const { ctx, notes, state } = createFakeContext({
+    selected: CLAUDE_THREAD,
+    failWith: { compactThread: new Error("no summary") },
+  });
+  await run("/compact intelligent", ctx);
+  expect(notes[0]?.tone).toBe(FeedbackTone.Error);
+  expect(state.refreshed).toBe(0);
 });
 
 test("/threads with no threads says so instead of printing an empty list", async () => {

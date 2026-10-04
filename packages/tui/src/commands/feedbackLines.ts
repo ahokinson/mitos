@@ -77,11 +77,11 @@ export function mergeFeed(
     (feedback) => feedback.threadId === currentThreadId,
   );
   const items: { item: FeedItem; at: number }[] = [
-    ...events.map((event) => ({
+    ...events.map((event): { item: FeedItem; at: number } => ({
       item: { kind: FeedItemKind.Event, event },
       at: Date.parse(event.created_at),
     })),
-    ...scoped.map((feedback) => ({
+    ...scoped.map((feedback): { item: FeedItem; at: number } => ({
       item: { kind: FeedItemKind.Feedback, feedback },
       at: feedback.createdAt,
     })),

@@ -18,6 +18,7 @@ import { resolveDbPath } from "@config/paths.ts";
 import {
   answerRequest,
   archiveThread,
+  compactThread,
   createThread,
   deleteThread,
   hooksInit,
@@ -30,13 +31,14 @@ import {
 import { LayoutRenderer } from "@layout/renderers.tsx";
 import { DEFAULT_LAYOUT_CONFIG, collectFocusableIds } from "@layout/trees.ts";
 import { createThreadEventsState } from "@session/events.ts";
+import { pruneEmptyThreads } from "@session/exits.ts";
 import { FeedbackTone, createFeedbackState } from "@commands/feedbackLines.ts";
 import { type KnownHarness, detectInstalledHarnesses } from "@harness/harnesses.ts";
 import { type Thread, createThreadListState } from "@session/threads.ts";
 import { createSelectionUsageState } from "@session/usage.ts";
 import { AppStateProvider } from "@app/states.tsx";
 import { createSuggestionsState } from "@commands/suggestionStates.ts";
-import { listUserMessages } from "@database/databases.ts";
+import { listUserMessages } from "@database/views.ts";
 import { watchDatabase } from "@database/watchers.ts";
 import { createFocusRing } from "@input/focusRings.ts";
 import { resolveKeyBindings } from "@input/keybindings.ts";
@@ -78,11 +80,15 @@ export function App(props: { configHandle: ConfigHandle }) {
     bumpUsage();
   }
 
+  /** Threads this session created on launch; any still empty at exit are deleted. */
+  const launched = new Set<string>();
+
   /** Launch always starts a fresh thread; `/resume` and `/threads` reach old ones. */
   async function initializeSelection(): Promise<void> {
     try {
       const harness = resolveDefaultHarness();
       const thread = await createThread(harness);
+      launched.add(thread.id);
       setSelected(thread);
       setCurrentHarness(harness);
       list.refresh();
@@ -91,10 +97,19 @@ export function App(props: { configHandle: ConfigHandle }) {
     }
   }
 
+  let quitting = false;
+  async function quit(): Promise<void> {
+    if (quitting) return;
+    quitting = true;
+    await pruneEmptyThreads(launched);
+    process.exit(0);
+  }
+
   onMount(() => {
     refresh();
     void initializeSelection();
     onCleanup(watchDatabase(resolveDbPath(process.env.MITOS_STATE_DIR), refresh));
+    for (const signal of ["SIGTERM", "SIGHUP"] as const) process.on(signal, () => void quit());
   });
 
   async function withWorking(run: () => Promise<void>): Promise<void> {
@@ -155,7 +170,7 @@ export function App(props: { configHandle: ConfigHandle }) {
       refresh,
       bumpUsage,
       note: (threadId, tone, lines) => feedback.push({ threadId, tone, lines }),
-      mutations: { reassignHarness, archiveThread, deleteThread, noteThread, setMode, answerRequest, hooksStatus, hooksInit },
+      mutations: { reassignHarness, archiveThread, compactThread, deleteThread, noteThread, setMode, answerRequest, hooksStatus, hooksInit },
     };
   }
 
@@ -191,6 +206,7 @@ export function App(props: { configHandle: ConfigHandle }) {
     focusRing,
     startNewThread: () => startNewThread(resolveDefaultHarness()),
     refresh,
+    quit: () => void quit(),
   });
 
   return (
@@ -202,7 +218,7 @@ export function App(props: { configHandle: ConfigHandle }) {
         events,
         feedback,
         onSend: handleSend,
-        loadHistory: () => listUserMessages(process.env.MITOS_WORKSPACE_KEY, HISTORY_LIMIT, resolveDbPath(process.env.MITOS_STATE_DIR)),
+        loadHistory: () => listUserMessages(process.env.MITOS_WORKSPACE_KEY, HISTORY_LIMIT),
         onDraftChange: suggestions.setDraft,
         registerSuggestionApplier: suggestions.registerApplier,
         suggestions: suggestions.suggestions,

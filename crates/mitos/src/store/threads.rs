@@ -8,7 +8,7 @@ use crate::domain::{EventKind, NewThreadEvent, Thread, ThreadMode, ThreadStatus,
 
 const COLUMNS: &str = "id, workspace_id, status, mode, active_harness, native_session, last_event_seq, created_at, updated_at";
 
-fn thread_from_row(row: &Row) -> Result<Thread> {
+pub(super) fn thread_from_row(row: &Row) -> Result<Thread> {
     Ok(Thread {
         id: row.get(0)?,
         workspace_id: row.get(1)?,

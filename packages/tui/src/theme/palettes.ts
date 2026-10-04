@@ -10,6 +10,7 @@ export const defaultTheme: Theme = {
   text: "default",
   textMuted: "default",
   textDim: "ansi:bright-black",
+  diffText: "ansi:black",
   accent: "ansi:blue",
   success: "ansi:green",
   warning: "ansi:yellow",
