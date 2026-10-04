@@ -1,21 +1,19 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 
-use crate::domain::{Observation, PlanWindows};
+use crate::domain::{HarnessKind, Observation, PlanWindows};
 
-/// `None` for an unknown harness or a payload that is not a JSON object.
-pub fn parse(harness: &str, event: Option<&str>, payload: &Value) -> Option<Observation> {
+/// `None` for a payload that is not a JSON object.
+pub fn parse(harness: HarnessKind, event: Option<&str>, payload: &Value) -> Option<Observation> {
     if !payload.is_object() {
         return None;
     }
     let mut observation = match harness {
-        "claude" => claude(payload),
-        "codex" => codex(payload),
-        "hermes" => hermes(payload),
-        "opencode" => opencode(payload),
-        _ => return None,
+        HarnessKind::Claude => claude(payload),
+        HarnessKind::Codex => codex(payload),
+        HarnessKind::Hermes => hermes(payload),
+        HarnessKind::OpenCode => opencode(payload),
     };
-    harness.clone_into(&mut observation.harness);
     observation.event = event
         .map(str::to_owned)
         .or(observation.event)
@@ -46,7 +44,7 @@ fn claude(payload: &Value) -> Observation {
             week_percent: fresh_window(payload, "seven_day").map(|window| window.0),
             week_resets_at: fresh_window(payload, "seven_day").map(|window| window.1),
         }),
-        ..Observation::default()
+        ..Observation::new(HarnessKind::Claude)
     }
 }
 
@@ -94,7 +92,7 @@ fn codex(payload: &Value) -> Observation {
         native_session: str_at(payload, &["session_id"]),
         cwd: str_at(payload, &["cwd"]),
         model: str_at(payload, &["model"]),
-        ..Observation::default()
+        ..Observation::new(HarnessKind::Codex)
     }
 }
 
@@ -104,7 +102,7 @@ fn hermes(payload: &Value) -> Observation {
         native_session: str_at(payload, &["session_id"]),
         cwd: str_at(payload, &["cwd"]),
         model: str_at(payload, &["extra", "model"]),
-        ..Observation::default()
+        ..Observation::new(HarnessKind::Hermes)
     }
 }
 
@@ -128,7 +126,7 @@ fn opencode(payload: &Value) -> Observation {
             .and_then(Value::as_str)
             .map(str::to_owned),
         cost_usd: in_info(&["cost"]).and_then(Value::as_f64),
-        ..Observation::default()
+        ..Observation::new(HarnessKind::OpenCode)
     }
 }
 
@@ -156,6 +154,7 @@ mod tests {
     use serde_json::json;
 
     use super::parse;
+    use crate::domain::HarnessKind;
 
     fn future(seconds: i64) -> i64 {
         chrono::Utc::now().timestamp() + seconds
@@ -182,9 +181,9 @@ mod tests {
                 "seven_day": { "used_percentage": 41.2, "resets_at": future(86_400) }
             }
         });
-        let observation = parse("claude", None, &payload).unwrap();
+        let observation = parse(HarnessKind::Claude, None, &payload).unwrap();
 
-        assert_eq!(observation.harness, "claude");
+        assert_eq!(observation.harness, HarnessKind::Claude);
         assert_eq!(observation.event.as_deref(), Some("statusline"));
         assert_eq!(observation.native_session.as_deref(), Some("abc"));
         assert_eq!(observation.cwd.as_deref(), Some("/work"));
@@ -208,7 +207,7 @@ mod tests {
                 "current_usage": null
             }
         });
-        let observation = parse("claude", None, &payload).unwrap();
+        let observation = parse(HarnessKind::Claude, None, &payload).unwrap();
 
         assert_eq!(observation.context_used_tokens, Some(16_000));
     }
@@ -219,7 +218,7 @@ mod tests {
             "session_id": "abc",
             "context_window": { "context_window_size": 200_000, "used_percentage": 10 }
         });
-        let observation = parse("claude", None, &payload).unwrap();
+        let observation = parse(HarnessKind::Claude, None, &payload).unwrap();
 
         assert_eq!(observation.context_used_tokens, Some(20_000));
         assert_eq!(observation.context_limit_tokens, Some(200_000));
@@ -231,7 +230,7 @@ mod tests {
             "session_id": "abc",
             "context_window": { "context_window_size": 200_000 }
         });
-        let observation = parse("claude", None, &payload).unwrap();
+        let observation = parse(HarnessKind::Claude, None, &payload).unwrap();
 
         assert_eq!(observation.context_used_tokens, None);
         assert_eq!(observation.context_limit_tokens, Some(200_000));
@@ -246,7 +245,10 @@ mod tests {
                 "seven_day": { "used_percentage": 10.0, "resets_at": future(60) }
             }
         });
-        let plan = parse("claude", None, &payload).unwrap().plan.unwrap();
+        let plan = parse(HarnessKind::Claude, None, &payload)
+            .unwrap()
+            .plan
+            .unwrap();
 
         assert_eq!(plan.five_hour_percent, None);
         assert_eq!(plan.five_hour_resets_at, None);
@@ -255,7 +257,8 @@ mod tests {
 
     #[test]
     fn claude_without_optional_sections_still_identifies_the_session() {
-        let observation = parse("claude", None, &json!({ "session_id": "abc" })).unwrap();
+        let observation =
+            parse(HarnessKind::Claude, None, &json!({ "session_id": "abc" })).unwrap();
 
         assert_eq!(observation.native_session.as_deref(), Some("abc"));
         assert_eq!(observation.cost_usd, None);
@@ -273,7 +276,7 @@ mod tests {
             "model": "gpt-6-astra",
             "turn_id": "t1"
         });
-        let observation = parse("codex", None, &payload).unwrap();
+        let observation = parse(HarnessKind::Codex, None, &payload).unwrap();
 
         assert_eq!(observation.event.as_deref(), Some("Stop"));
         assert_eq!(observation.native_session.as_deref(), Some("c1"));
@@ -289,7 +292,7 @@ mod tests {
             "cwd": "/work",
             "extra": { "model": "deepseek/v4", "platform": "cli" }
         });
-        let observation = parse("hermes", None, &payload).unwrap();
+        let observation = parse(HarnessKind::Hermes, None, &payload).unwrap();
 
         assert_eq!(observation.event.as_deref(), Some("on_session_start"));
         assert_eq!(observation.model.as_deref(), Some("deepseek/v4"));
@@ -309,7 +312,7 @@ mod tests {
                 }
             }
         });
-        let observation = parse("opencode", None, &payload).unwrap();
+        let observation = parse(HarnessKind::OpenCode, None, &payload).unwrap();
 
         assert_eq!(observation.event.as_deref(), Some("session.updated"));
         assert_eq!(observation.native_session.as_deref(), Some("ses_1"));
@@ -324,7 +327,7 @@ mod tests {
             "type": "session.idle",
             "properties": { "sessionID": "ses_1" }
         });
-        let observation = parse("opencode", None, &payload).unwrap();
+        let observation = parse(HarnessKind::OpenCode, None, &payload).unwrap();
 
         assert_eq!(observation.native_session.as_deref(), Some("ses_1"));
         assert_eq!(observation.cost_usd, None);
@@ -335,7 +338,7 @@ mod tests {
         let payload = json!({ "hook_event_name": "Stop", "session_id": "c1" });
 
         assert_eq!(
-            parse("codex", Some("SessionEnd"), &payload)
+            parse(HarnessKind::Codex, Some("SessionEnd"), &payload)
                 .unwrap()
                 .event
                 .as_deref(),
@@ -344,9 +347,8 @@ mod tests {
     }
 
     #[test]
-    fn unknown_harnesses_and_non_objects_are_ignored() {
-        assert!(parse("nope", None, &json!({})).is_none());
-        assert!(parse("claude", None, &json!("text")).is_none());
-        assert!(parse("claude", None, &json!([1, 2])).is_none());
+    fn non_objects_are_ignored() {
+        assert!(parse(HarnessKind::Claude, None, &json!("text")).is_none());
+        assert!(parse(HarnessKind::Claude, None, &json!([1, 2])).is_none());
     }
 }

@@ -1,4 +1,3 @@
-import type { ThreadEvent } from "@session/events.ts";
 import { Tone } from "@theme/themes.ts";
 
 export enum ToolKind {
@@ -13,9 +12,33 @@ export enum ToolKind {
   Other = "other",
 }
 
-export type ToolCall = {
+/** Which of the payload's own shapes an event carries. */
+export enum ToolShape {
+  ToolUse = "tool_use",
+  ToolResult = "tool_result",
+  Other = "other",
+}
+
+/** Mirrors `crates/mitos/src/tools/mod.rs::ToolFacts`: what a tool event's
+ * payload says, normalized across harnesses. */
+export type ToolFacts = {
   kind: ToolKind;
   /** The tool's own name, when the harness reports one separately. */
+  name: string | null;
+  argument: string;
+  /** The id that ties a call to its result. */
+  tool_use_id: string | null;
+  path: string | null;
+  shape: ToolShape;
+  /** A successful read or file edit, whose result adds nothing to its call. */
+  quiet: boolean;
+  patched: boolean;
+};
+
+type WithFacts = { tool?: ToolFacts };
+
+export type ToolCall = {
+  kind: ToolKind;
   name: string | null;
   /** Lines of the main argument, capped at `MAX_ARGUMENT_LINES`. */
   lines: string[];
@@ -25,52 +48,6 @@ export type ToolCall = {
 
 const MAX_ARGUMENT_LINES = 4;
 const MAX_LINE_LENGTH = 400;
-
-const KINDS_BY_NAME: Record<string, ToolKind> = {
-  bash: ToolKind.Shell,
-  execute: ToolKind.Shell,
-  commandexecution: ToolKind.Shell,
-  read: ToolKind.Read,
-  notebookread: ToolKind.Read,
-  edit: ToolKind.Edit,
-  multiedit: ToolKind.Edit,
-  notebookedit: ToolKind.Edit,
-  filechange: ToolKind.Edit,
-  write: ToolKind.Write,
-  grep: ToolKind.Search,
-  glob: ToolKind.Search,
-  search: ToolKind.Search,
-  webfetch: ToolKind.Fetch,
-  websearch: ToolKind.Fetch,
-  fetch: ToolKind.Fetch,
-  task: ToolKind.Agent,
-  agent: ToolKind.Agent,
-  todowrite: ToolKind.Todo,
-};
-
-const ARGUMENT_KEYS = [
-  "command",
-  "file_path",
-  "notebook_path",
-  "pattern",
-  "path",
-  "url",
-  "query",
-  "description",
-  "prompt",
-];
-
-function record(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function kindOf(name: unknown): ToolKind {
-  return typeof name === "string"
-    ? (KINDS_BY_NAME[name.toLowerCase()] ?? ToolKind.Other)
-    : ToolKind.Other;
-}
 
 function splitArgument(text: string): Pick<ToolCall, "lines" | "hidden"> {
   const trimmed = text.trim();
@@ -101,48 +78,34 @@ const PATH_KINDS: ReadonlySet<ToolKind> = new Set([
   ToolKind.Write,
 ]);
 
-/** A successful Claude read or file edit: the call row already says what
- * happened, and the result is only file text or a confirmation sentence. */
-export function isQuietResult(event: ThreadEvent): boolean {
-  const payload = record(event.payload);
-  if (payload.type !== "tool_result" || payload.is_error === true) return false;
-  const result = record(payload.tool_use_result);
-  return "file" in result || "structuredPatch" in result;
+export function isQuietResult(event: WithFacts): boolean {
+  return event.tool?.quiet ?? false;
 }
 
 /** Ids of Claude calls whose row is redundant: an edit whose successful
  * result carries a diff (the diff header names the file), and a read of that
  * same file right before it. */
-export function foldedCallIds(events: readonly ThreadEvent[]): Set<string> {
+export function foldedCallIds(events: readonly WithFacts[]): Set<string> {
   const patched = new Set<string>();
-  for (const event of events) {
-    const payload = record(event.payload);
-    if (
-      payload.type === "tool_result" &&
-      payload.is_error !== true &&
-      typeof payload.tool_use_id === "string" &&
-      "structuredPatch" in record(payload.tool_use_result)
-    )
-      patched.add(payload.tool_use_id);
-  }
+  for (const { tool } of events)
+    if (tool?.patched && tool.tool_use_id !== null)
+      patched.add(tool.tool_use_id);
   const folded = new Set<string>(patched);
-  let read: { id: string; path: unknown } | null = null;
-  for (const event of events) {
-    const payload = record(event.payload);
-    if (payload.type === "tool_result") continue;
-    if (payload.type !== "tool_use" || typeof payload.id !== "string") {
+  let read: { id: string; path: string | null } | null = null;
+  for (const { tool } of events) {
+    if (tool?.shape === ToolShape.ToolResult) continue;
+    if (tool?.shape !== ToolShape.ToolUse || tool.tool_use_id === null) {
       read = null;
       continue;
     }
-    const kind = kindOf(payload.name);
-    const path = record(payload.input).file_path;
-    if (kind === ToolKind.Read) read = { id: payload.id, path };
+    if (tool.kind === ToolKind.Read)
+      read = { id: tool.tool_use_id, path: tool.path };
     else {
       if (
         read &&
-        (kind === ToolKind.Edit || kind === ToolKind.Write) &&
-        patched.has(payload.id) &&
-        read.path === path
+        (tool.kind === ToolKind.Edit || tool.kind === ToolKind.Write) &&
+        patched.has(tool.tool_use_id) &&
+        read.path === tool.path
       )
         folded.add(read.id);
       read = null;
@@ -151,40 +114,23 @@ export function foldedCallIds(events: readonly ThreadEvent[]): Set<string> {
   return folded;
 }
 
-/** The id that ties a Claude call to its result. */
-export function toolUseId(event: ThreadEvent): string | null {
-  const payload = record(event.payload);
-  const id = payload.type === "tool_use" ? payload.id : payload.tool_use_id;
-  return typeof id === "string" ? id : null;
+export function toolUseId(event: WithFacts): string | null {
+  return event.tool?.tool_use_id ?? null;
 }
 
-/** A tool call event as the row renders it. Claude reports only the tool name
- * as `content`, so its argument comes from the `tool_use` input; the other
- * harnesses already describe the call in `content`. */
-export function toolCall(event: ThreadEvent): ToolCall {
-  const payload = record(event.payload);
-  const content = event.content ?? "";
-  if (payload.type === "tool_use") {
-    const input = record(payload.input);
-    const key = ARGUMENT_KEYS.find(
-      (candidate) =>
-        typeof input[candidate] === "string" && input[candidate] !== "",
-    );
-    const kind = kindOf(payload.name);
-    const argument = key === undefined ? "" : (input[key] as string);
-    return {
-      kind,
-      name: content,
-      ...splitArgument(PATH_KINDS.has(kind) ? shortenPath(argument) : argument),
-    };
-  }
-  const kind = [payload.tool, payload.kind, payload.type]
-    .map(kindOf)
-    .find((candidate) => candidate !== ToolKind.Other);
+/** A tool call event as the row renders it. Claude's argument is a path for
+ * file tools, shortened here because only this process knows its cwd. */
+export function toolCall(
+  event: WithFacts & { content: string | null },
+): ToolCall {
+  const facts = event.tool;
+  const kind = facts?.kind ?? ToolKind.Other;
+  const argument = facts?.argument ?? event.content ?? "";
+  const isPath = facts?.shape === ToolShape.ToolUse && PATH_KINDS.has(kind);
   return {
-    kind: kind ?? ToolKind.Other,
-    name: null,
-    ...splitArgument(content),
+    kind,
+    name: facts?.name ?? null,
+    ...splitArgument(isPath ? shortenPath(argument) : argument),
   };
 }
 

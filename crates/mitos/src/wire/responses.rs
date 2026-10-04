@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::versions::PROTOCOL_VERSION;
 use crate::domain::ThreadMode;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -18,16 +17,7 @@ pub struct Capabilities {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct NegotiateResponse {
-    pub protocol_version: u32,
-    pub kind: String,
-    pub capabilities: Capabilities,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct LaunchPlan {
-    pub protocol_version: u32,
-    pub kind: String,
     pub program: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -39,8 +29,6 @@ pub struct LaunchPlan {
 impl LaunchPlan {
     pub fn new(program: &str, args: Vec<String>, native_session: Option<Value>) -> Self {
         Self {
-            protocol_version: PROTOCOL_VERSION,
-            kind: "launch".into(),
             program: program.into(),
             args,
             env: BTreeMap::new(),
@@ -51,8 +39,6 @@ impl LaunchPlan {
 
 #[derive(Debug, Deserialize)]
 pub struct CollectedHandoff {
-    pub protocol_version: u32,
-    pub kind: String,
     pub native_session: Option<Value>,
     pub transcript: Option<CollectedTranscript>,
     #[serde(default)]
@@ -66,8 +52,6 @@ impl CollectedHandoff {
         usage: Option<CollectedUsage>,
     ) -> Self {
         Self {
-            protocol_version: PROTOCOL_VERSION,
-            kind: "handoff".into(),
             native_session,
             transcript,
             usage,

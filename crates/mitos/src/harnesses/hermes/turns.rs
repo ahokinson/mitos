@@ -15,7 +15,7 @@ use super::streams::{
     AcpStream, PendingPermission, REQUEST_PERMISSION, SESSION_UPDATE, outcome_for,
     permission_request,
 };
-use crate::adapters::Emitter;
+use crate::harnesses::{Emitter, Turn};
 use crate::ipc::answers::AnswerListener;
 use crate::json::string_value;
 use crate::rpc::{Inbound, PeerExited, RpcPeer, RpcWriter};
@@ -25,13 +25,6 @@ const PROTOCOL_VERSION: u32 = 1;
 const METHOD_NOT_FOUND: i64 = -32601;
 const EXITED: &str = "hermes acp exited";
 const DIAGNOSTIC_WAIT: Duration = Duration::from_millis(200);
-
-pub struct Turn<'a> {
-    pub workdir: &'a Path,
-    pub text: &'a str,
-    pub session: Option<&'a str>,
-    pub ephemeral: bool,
-}
 
 pub type SharedPending = Arc<Mutex<HashMap<String, PendingPermission>>>;
 
@@ -317,6 +310,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;
+    use crate::domain::ThreadMode;
     use crate::harnesses::fixtures::{FakeProgram, kinds_of};
 
     const SESSION: &str = "sess-1";
@@ -438,6 +432,7 @@ mod tests {
                 workdir: Path::new("/work"),
                 text: "hello",
                 session,
+                mode: ThreadMode::Build,
                 ephemeral: false,
             };
             drive_turn(&turn, peer, &mut emitter, pending, diagnostic).unwrap();
@@ -729,6 +724,7 @@ mod tests {
                 workdir: &fake.dir,
                 text: "hello",
                 session: None,
+                mode: ThreadMode::Build,
                 ephemeral: false,
             };
             run_turn(fake.path.as_os_str(), &turn, &mut emitter, None).unwrap();
@@ -760,6 +756,7 @@ cat >/dev/null"#;
             workdir: &fake.dir,
             text: "hello",
             session: None,
+            mode: ThreadMode::Build,
             ephemeral,
         };
         run_turn(fake.path.as_os_str(), &turn, &mut emitter, None).unwrap();

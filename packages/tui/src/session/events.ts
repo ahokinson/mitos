@@ -1,10 +1,12 @@
 import { syncEvents } from "@database/views.ts";
+import type { FileDiff } from "@session/diffs.ts";
 import {
   describeRequest,
   type RequestKind,
   RequestStatus,
   requestHint,
 } from "@session/requests.ts";
+import type { ToolFacts } from "@session/tools.ts";
 import { Tone } from "@theme/themes.ts";
 import { createEffect, createSignal, on } from "solid-js";
 
@@ -43,6 +45,10 @@ export type ThreadEvent = {
   content: string | null;
   payload: unknown | null;
   created_at: string;
+  /** Computed by `thread sync`; empty except on tool events. */
+  diffs?: FileDiff[];
+  /** Computed by `thread sync`; present only on tool events. */
+  tool?: ToolFacts;
 };
 
 export type ThreadEventsState = {

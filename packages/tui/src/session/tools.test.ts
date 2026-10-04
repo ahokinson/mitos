@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 
-import { EventKind, type ThreadEvent } from "@session/events.ts";
 import {
   foldedCallIds,
   isQuietResult,
+  type ToolFacts,
   ToolKind,
+  ToolShape,
   toolCall,
   toolGlyph,
   toolTone,
@@ -12,26 +13,41 @@ import {
 } from "@session/tools.ts";
 import { Tone } from "@theme/themes.ts";
 
-function call(content: string | null, payload: unknown): ThreadEvent {
+function facts(overrides: Partial<ToolFacts>): ToolFacts {
   return {
-    thread_id: "t1",
-    seq: 1,
-    turn_id: null,
-    harness: "claude",
-    kind: EventKind.ToolCall,
-    role: null,
-    content,
-    payload,
-    created_at: "2026-01-01T00:00:00Z",
+    kind: ToolKind.Other,
+    name: null,
+    argument: "",
+    tool_use_id: null,
+    path: null,
+    shape: ToolShape.Other,
+    quiet: false,
+    patched: false,
+    ...overrides,
   };
 }
 
-const claude = (name: string, input: unknown) =>
-  call(name, { type: "tool_use", name, input });
+const withFacts = (
+  overrides: Partial<ToolFacts>,
+  content: string | null = null,
+) => ({
+  content,
+  tool: facts(overrides),
+});
 
-test("a Claude call takes its kind from the tool and its argument from the input", () => {
+test("a Claude call shows its tool name and the head of its argument", () => {
   expect(
-    toolCall(claude("Bash", { command: "git status", description: "x" })),
+    toolCall(
+      withFacts(
+        {
+          kind: ToolKind.Shell,
+          name: "Bash",
+          argument: "git status",
+          shape: ToolShape.ToolUse,
+        },
+        "Bash",
+      ),
+    ),
   ).toEqual({
     kind: ToolKind.Shell,
     name: "Bash",
@@ -39,62 +55,92 @@ test("a Claude call takes its kind from the tool and its argument from the input
     hidden: 0,
   });
   expect(
-    toolCall(claude("Read", { file_path: "src/a.ts", limit: 5 })).lines,
-  ).toEqual(["src/a.ts"]);
-  expect(
-    toolCall(claude("Grep", { pattern: "foo", path: "src" })).lines,
-  ).toEqual(["foo"]);
-  expect(toolCall(claude("TodoWrite", { todos: [] }))).toMatchObject({
-    kind: ToolKind.Todo,
-    lines: [],
-  });
+    toolCall(
+      withFacts({
+        kind: ToolKind.Todo,
+        name: "TodoWrite",
+        shape: ToolShape.ToolUse,
+      }),
+    ),
+  ).toMatchObject({ kind: ToolKind.Todo, lines: [] });
 });
 
 test("a long command keeps its first lines and counts the rest", () => {
-  const command = Array.from({ length: 7 }, (_, i) => `line ${i + 1}`).join(
+  const argument = Array.from({ length: 7 }, (_, i) => `line ${i + 1}`).join(
     "\n",
   );
-  const shown = toolCall(claude("Bash", { command }));
+  const shown = toolCall(
+    withFacts({
+      kind: ToolKind.Shell,
+      name: "Bash",
+      argument,
+      shape: ToolShape.ToolUse,
+    }),
+  );
   expect(shown.lines).toEqual(["line 1", "line 2", "line 3", "line 4"]);
   expect(shown.hidden).toBe(3);
 });
 
-test("other harnesses keep their content and infer the kind from the payload", () => {
-  expect(toolCall(call("bun test", { type: "commandExecution" }))).toEqual({
+test("an over-long line is cut with an ellipsis", () => {
+  const shown = toolCall(
+    withFacts({ kind: ToolKind.Shell, argument: "x".repeat(500) }),
+  );
+  expect(shown.lines[0]).toHaveLength(401);
+  expect(shown.lines[0]?.endsWith("…")).toBe(true);
+});
+
+test("a Claude file path is shortened against the working directory", () => {
+  const path = `${process.cwd()}/src/a.ts`;
+  const shown = toolCall(
+    withFacts({
+      kind: ToolKind.Read,
+      name: "Read",
+      argument: path,
+      shape: ToolShape.ToolUse,
+    }),
+  );
+  expect(shown.lines).toEqual(["src/a.ts"]);
+  const other = toolCall(withFacts({ kind: ToolKind.Read, argument: path }));
+  expect(other.lines).toEqual([path]);
+});
+
+test("other harnesses keep their content as the argument and have no name", () => {
+  expect(
+    toolCall(
+      withFacts({ kind: ToolKind.Shell, argument: "bun test" }, "bun test"),
+    ),
+  ).toEqual({
     kind: ToolKind.Shell,
     name: null,
     lines: ["bun test"],
     hidden: 0,
   });
-  expect(toolCall(call("1 file change", { type: "fileChange" })).kind).toBe(
-    ToolKind.Edit,
-  );
-  expect(toolCall(call("read: a.ts", { tool: "read" })).kind).toBe(
-    ToolKind.Read,
-  );
-  expect(toolCall(call("ls", { kind: "execute" })).kind).toBe(ToolKind.Shell);
-  expect(toolCall(call("mystery", {})).kind).toBe(ToolKind.Other);
 });
 
-function withId(event: ThreadEvent, id: string): ThreadEvent {
-  return { ...event, payload: { ...(event.payload as object), id } };
+test("an event without facts falls back to its content", () => {
+  expect(toolCall({ content: "mystery" })).toEqual({
+    kind: ToolKind.Other,
+    name: null,
+    lines: ["mystery"],
+    hidden: 0,
+  });
+});
+
+function use(id: string, kind: ToolKind, path: string | null = null) {
+  return {
+    tool: facts({ kind, tool_use_id: id, path, shape: ToolShape.ToolUse }),
+  };
 }
 
-function patchResult(id: string, isError = false): ThreadEvent {
+function patchResult(id: string, patched = true) {
   return {
-    ...call("ok", {
-      type: "tool_result",
-      tool_use_id: id,
-      is_error: isError,
-      tool_use_result: { filePath: "a.ts", structuredPatch: [] },
-    }),
-    kind: EventKind.ToolResult,
+    tool: facts({ shape: ToolShape.ToolResult, tool_use_id: id, patched }),
   };
 }
 
 test("a successful edit folds its call and a read of the same file just before it", () => {
-  const read = withId(claude("Read", { file_path: "a.ts" }), "r1");
-  const edit = withId(claude("Edit", { file_path: "a.ts" }), "e1");
+  const read = use("r1", ToolKind.Read, "a.ts");
+  const edit = use("e1", ToolKind.Edit, "a.ts");
   expect([...foldedCallIds([read, edit, patchResult("e1")])].sort()).toEqual([
     "e1",
     "r1",
@@ -102,20 +148,52 @@ test("a successful edit folds its call and a read of the same file just before i
 });
 
 test("a read stays when the edit failed, is unresolved, or targets another file", () => {
-  const read = withId(claude("Read", { file_path: "a.ts" }), "r1");
-  const edit = withId(claude("Edit", { file_path: "a.ts" }), "e1");
-  const other = withId(claude("Edit", { file_path: "b.ts" }), "e2");
-  expect(foldedCallIds([read, edit, patchResult("e1", true)]).size).toBe(0);
+  const read = use("r1", ToolKind.Read, "a.ts");
+  const edit = use("e1", ToolKind.Edit, "a.ts");
+  const other = use("e2", ToolKind.Edit, "b.ts");
+  expect(foldedCallIds([read, edit, patchResult("e1", false)]).size).toBe(0);
   expect(foldedCallIds([read, edit]).size).toBe(0);
   expect([...foldedCallIds([read, other, patchResult("e2")])]).toEqual(["e2"]);
 });
 
 test("a read separated from the edit by another call is kept", () => {
-  const read = withId(claude("Read", { file_path: "a.ts" }), "r1");
-  const bash = withId(claude("Bash", { command: "ls" }), "b1");
-  const edit = withId(claude("Edit", { file_path: "a.ts" }), "e1");
+  const read = use("r1", ToolKind.Read, "a.ts");
+  const bash = use("b1", ToolKind.Shell);
+  const edit = use("e1", ToolKind.Edit, "a.ts");
   expect([...foldedCallIds([read, bash, edit, patchResult("e1")])]).toEqual([
     "e1",
+  ]);
+});
+
+test("a non-tool event between a read and an edit keeps the read", () => {
+  const read = use("r1", ToolKind.Read, "a.ts");
+  const edit = use("e1", ToolKind.Edit, "a.ts");
+  expect([...foldedCallIds([read, {}, edit, patchResult("e1")])]).toEqual([
+    "e1",
+  ]);
+});
+
+test("a call without an id never folds and breaks the read-edit pairing", () => {
+  const read = use("r1", ToolKind.Read, "a.ts");
+  const anonymous = {
+    tool: facts({
+      kind: ToolKind.Edit,
+      path: "a.ts",
+      shape: ToolShape.ToolUse,
+    }),
+  };
+  const edit = use("e1", ToolKind.Edit, "a.ts");
+  expect([
+    ...foldedCallIds([read, anonymous, edit, patchResult("e1")]),
+  ]).toEqual(["e1"]);
+});
+
+test("a write after a read of the same file folds the read", () => {
+  const read = use("r1", ToolKind.Read, "a.ts");
+  const write = use("w1", ToolKind.Write, "a.ts");
+  expect([...foldedCallIds([read, write, patchResult("w1")])].sort()).toEqual([
+    "r1",
+    "w1",
   ]);
 });
 
@@ -136,49 +214,10 @@ test("every tool kind has a tone", () => {
   expect(toolTone(ToolKind.Other)).toBe(Tone.Muted);
 });
 
-test("a call and its result share a tool use id", () => {
-  const use = withId(claude("Bash", { command: "ls" }), "b1");
-  expect(toolUseId(use)).toBe("b1");
-  expect(toolUseId(call("x", { type: "tool_result", tool_use_id: "b1" }))).toBe(
-    "b1",
-  );
-  expect(toolUseId(call("x", { type: "tool_use", id: 5 }))).toBeNull();
-  expect(toolUseId(call("x", null))).toBeNull();
-});
-
-test("a non-tool event between a read and an edit keeps the read", () => {
-  const read = withId(claude("Read", { file_path: "a.ts" }), "r1");
-  const edit = withId(claude("Edit", { file_path: "a.ts" }), "e1");
-  const note = call("hi", null);
-  expect([...foldedCallIds([read, note, edit, patchResult("e1")])]).toEqual([
-    "e1",
-  ]);
-});
-
-test("a write after a read of the same file folds the read", () => {
-  const read = withId(claude("Read", { file_path: "a.ts" }), "r1");
-  const write = withId(claude("Write", { file_path: "a.ts" }), "w1");
-  expect([...foldedCallIds([read, write, patchResult("w1")])].sort()).toEqual([
-    "r1",
-    "w1",
-  ]);
-});
-
-test("only successful file results are quiet", () => {
-  expect(isQuietResult(call("x", { type: "tool_result" }))).toBe(false);
-  expect(
-    isQuietResult(
-      call("x", { type: "tool_result", tool_use_result: { file: {} } }),
-    ),
-  ).toBe(true);
-  expect(
-    isQuietResult(
-      call("x", {
-        type: "tool_result",
-        is_error: true,
-        tool_use_result: { file: {} },
-      }),
-    ),
-  ).toBe(false);
-  expect(isQuietResult(call("x", { type: "tool_use" }))).toBe(false);
+test("the tool use id and quiet flag come from the facts", () => {
+  expect(toolUseId(use("b1", ToolKind.Shell))).toBe("b1");
+  expect(toolUseId({})).toBeNull();
+  expect(isQuietResult({ tool: facts({ quiet: true }) })).toBe(true);
+  expect(isQuietResult({ tool: facts({}) })).toBe(false);
+  expect(isQuietResult({})).toBe(false);
 });

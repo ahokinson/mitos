@@ -4,7 +4,7 @@ mod locations;
 mod parsers;
 mod reports;
 
-pub use installs::{HARNESSES, init, status};
+pub use installs::{init, status};
 pub use locations::Locations;
 pub use parsers::parse;
 pub use reports::{HookStatus, InitOutcome, InitResult, Trust};

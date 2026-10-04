@@ -1,37 +1,37 @@
 use anyhow::{Context, Result};
 use libsql::{Row, params};
 
-use super::Store;
-use super::queries::{decode_json, encode_json};
-use crate::domain::{NewThreadEvent, ThreadEvent, now};
+use super::queries::{decode_json, encode_json, optional_text, parse_optional, text};
+use super::{Store, StoreError};
+use crate::domain::{HarnessKind, NewThreadEvent, ThreadEvent, ThreadId, Timestamp, TurnId, now};
 
 const COLUMNS: &str =
     "thread_id, seq, turn_id, harness, kind, role, content, payload_json, created_at";
 
 fn thread_event_from_row(row: &Row) -> Result<ThreadEvent> {
     Ok(ThreadEvent {
-        thread_id: row.get(0)?,
+        thread_id: text(row, 0)?,
         seq: row.get(1)?,
-        turn_id: row.get(2)?,
-        harness: row.get(3)?,
+        turn_id: optional_text(row, 2)?,
+        harness: parse_optional(row.get(3)?)?,
         kind: row.get::<String>(4)?.parse()?,
         role: row.get(5)?,
         content: row.get(6)?,
         payload: decode_json(row.get(7)?)?,
-        created_at: row.get(8)?,
+        created_at: text(row, 8)?,
     })
 }
 
 impl Store {
-    pub fn append_event(&self, thread_id: &str, event: NewThreadEvent) -> Result<ThreadEvent> {
+    pub fn append_event(&self, thread_id: &ThreadId, event: NewThreadEvent) -> Result<ThreadEvent> {
         self.append_event_at(thread_id, event, now())
     }
 
     pub(super) fn append_event_at(
         &self,
-        thread_id: &str,
+        thread_id: &ThreadId,
         event: NewThreadEvent,
-        created_at: String,
+        created_at: Timestamp,
     ) -> Result<ThreadEvent> {
         let kind = event.kind.context("event kind is required")?;
         let payload_json = encode_json(event.payload.as_ref())?;
@@ -40,10 +40,10 @@ impl Store {
             let mut rows = tx
                 .query(
                     "SELECT last_event_seq FROM threads WHERE id = ?1",
-                    params![thread_id],
+                    params![thread_id.as_str()],
                 )
                 .await?;
-            let row = rows.next().await?.context("no such thread")?;
+            let row = rows.next().await?.ok_or(StoreError::NotFound("thread"))?;
             let last_seq: i64 = row.get(0)?;
             drop(rows);
             let seq = last_seq + 1;
@@ -52,26 +52,26 @@ impl Store {
                     "INSERT INTO thread_events ({COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
                 ),
                 params![
-                    thread_id,
+                    thread_id.as_str(),
                     seq,
-                    event.turn_id.clone(),
-                    event.harness.clone(),
+                    event.turn_id.as_ref().map(TurnId::as_str),
+                    event.harness.map(HarnessKind::as_str),
                     kind.as_str(),
                     event.role.clone(),
                     event.content.clone(),
                     payload_json,
-                    created_at.clone()
+                    created_at.as_str()
                 ],
             )
             .await?;
             tx.execute(
                 "UPDATE threads SET last_event_seq = ?1, updated_at = ?2 WHERE id = ?3",
-                params![seq, created_at.clone(), thread_id],
+                params![seq, created_at.as_str(), thread_id.as_str()],
             )
             .await?;
             tx.commit().await?;
             Ok(ThreadEvent {
-                thread_id: thread_id.to_string(),
+                thread_id: thread_id.clone(),
                 seq,
                 turn_id: event.turn_id,
                 harness: event.harness,
@@ -84,25 +84,25 @@ impl Store {
         })
     }
 
-    pub fn user_message_for_turn(&self, thread_id: &str, turn_id: &str) -> Result<String> {
+    pub fn user_message_for_turn(&self, thread_id: &ThreadId, turn_id: &TurnId) -> Result<String> {
         let content = self
             .query_optional(
                 "SELECT content FROM thread_events \
                  WHERE thread_id = ?1 AND turn_id = ?2 AND kind = 'user_message' \
                  ORDER BY seq DESC LIMIT 1",
-                params![thread_id, turn_id],
+                params![thread_id.as_str(), turn_id.as_str()],
                 |row| Ok(row.get::<Option<String>>(0)?),
             )?
             .context("no user_message event for this turn")?;
         content.context("user_message event has no content")
     }
 
-    pub fn events_since(&self, thread_id: &str, since_seq: i64) -> Result<Vec<ThreadEvent>> {
+    pub fn events_since(&self, thread_id: &ThreadId, since_seq: i64) -> Result<Vec<ThreadEvent>> {
         self.query_all(
             &format!(
                 "SELECT {COLUMNS} FROM thread_events WHERE thread_id = ?1 AND seq > ?2 ORDER BY seq ASC"
             ),
-            params![thread_id, since_seq],
+            params![thread_id.as_str(), since_seq],
             thread_event_from_row,
         )
     }

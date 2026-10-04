@@ -1,9 +1,12 @@
+use std::str::FromStr;
+
 use anyhow::Result;
 use libsql::Row;
 use libsql::params::IntoParams;
 use serde_json::Value;
 
 use super::Store;
+use crate::domain::ParseError;
 
 pub(super) fn encode_json(value: Option<&Value>) -> Result<Option<String>> {
     Ok(value.map(serde_json::to_string).transpose()?)
@@ -11,6 +14,21 @@ pub(super) fn encode_json(value: Option<&Value>) -> Result<Option<String>> {
 
 pub(super) fn decode_json(text: Option<String>) -> Result<Option<Value>> {
     Ok(text.map(|text| serde_json::from_str(&text)).transpose()?)
+}
+
+/// A text column read as an id or timestamp.
+pub(super) fn text<T: From<String>>(row: &Row, index: i32) -> Result<T> {
+    Ok(row.get::<String>(index)?.into())
+}
+
+pub(super) fn optional_text<T: From<String>>(row: &Row, index: i32) -> Result<Option<T>> {
+    Ok(row.get::<Option<String>>(index)?.map(Into::into))
+}
+
+pub(super) fn parse_optional<T: FromStr<Err = ParseError>>(
+    text: Option<String>,
+) -> Result<Option<T>> {
+    Ok(text.map(|text| text.parse()).transpose()?)
 }
 
 impl Store {

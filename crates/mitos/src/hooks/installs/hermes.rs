@@ -3,10 +3,11 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use crate::domain::HarnessKind;
 use crate::hooks::files::{backup, blocked_reason, read_text, write_atomic};
 use crate::hooks::reports::{HookStatus, InitOutcome, InitResult, Trust};
 
-const HARNESS: &str = "hermes";
+const HARNESS: HarnessKind = HarnessKind::Hermes;
 const MARKER: &str = "mitos hook hermes";
 const EVENTS: [&str; 2] = ["on_session_start", "on_session_end"];
 
@@ -23,7 +24,7 @@ pub fn status(config: &Path, allowlist: &Path) -> HookStatus {
         Trust::Untrusted
     };
     HookStatus {
-        harness: HARNESS.into(),
+        harness: HARNESS,
         target: config.display().to_string(),
         installed,
         trust,

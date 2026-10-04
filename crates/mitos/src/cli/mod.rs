@@ -3,6 +3,7 @@ mod hooks;
 mod launchers;
 mod outputs;
 mod threads;
+mod tuis;
 mod views;
 
 use std::path::PathBuf;
@@ -11,8 +12,8 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 
-use crate::adapters::Adapters;
 use crate::handoff::DeterministicRenderer;
+use crate::harnesses::Adapters;
 use crate::service::ThreadService;
 use crate::store::Store;
 
@@ -25,9 +26,6 @@ use crate::store::Store;
 struct Cli {
     #[arg(long, global = true, env = "MITOS_STATE_DIR")]
     state_dir: Option<PathBuf>,
-
-    #[arg(long, global = true, env = "MITOS_ADAPTER_DIR")]
-    adapter_dir: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -56,6 +54,8 @@ enum Command {
     },
 }
 
+/// # Errors
+/// Returns the failure of the dispatched command.
 pub fn run() -> Result<()> {
     CompleteEnv::with_factory(Cli::command).complete();
     let cli = Cli::parse();
@@ -67,7 +67,7 @@ pub fn run() -> Result<()> {
     let store = Store::new(cli.state_dir)?;
     let renderer = DeterministicRenderer;
     let service = ThreadService::new(&store, &renderer);
-    let adapter = Adapters::new(cli.adapter_dir);
+    let adapter = Adapters;
     match cli.command {
         None => launchers::launch_tui(tui_state_dir),
         Some(Command::Enter(args)) => threads::enter(&service, &adapter, args),

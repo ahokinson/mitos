@@ -15,6 +15,7 @@ use crate::handoff::HandoffRenderer;
 use crate::store::Store;
 
 pub use notes::ThreadNotes;
+pub use views::EventView;
 
 pub struct ThreadService<'a> {
     store: &'a Store,

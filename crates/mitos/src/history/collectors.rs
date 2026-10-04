@@ -26,7 +26,7 @@ pub fn collect_requested_handoff(
     root: &Path,
     request: &HandoffRequest,
 ) -> Result<CollectedHandoff> {
-    let launched_at = DateTime::parse_from_rfc3339(&request.launched_at)
+    let launched_at = DateTime::parse_from_rfc3339(request.launched_at.as_str())
         .ok()
         .map(|parsed| parsed.with_timezone(&Utc));
     collect_jsonl_handoff(&JsonlSearch {

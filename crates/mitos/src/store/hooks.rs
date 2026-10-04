@@ -2,8 +2,9 @@ use anyhow::Result;
 use libsql::params;
 
 use super::Store;
+use super::queries::text;
 use super::usage::PlanUsageFields;
-use crate::domain::{HookLastSeen, Observation, now};
+use crate::domain::{HookLastSeen, Observation, ThreadId, now};
 
 fn sql_count(value: Option<u64>) -> Option<i64> {
     value.and_then(|value| i64::try_from(value).ok())
@@ -15,7 +16,7 @@ impl Store {
     pub fn record_observation(
         &self,
         observation: &Observation,
-        thread_id: Option<&str>,
+        thread_id: Option<&ThreadId>,
     ) -> Result<()> {
         self.execute(
             "INSERT INTO hook_observations \
@@ -31,23 +32,23 @@ impl Store {
                context_limit_tokens = COALESCE(excluded.context_limit_tokens, context_limit_tokens), \
                observed_at = excluded.observed_at",
             params![
-                observation.harness.clone(),
+                observation.harness.as_str(),
                 observation.native_session.clone().unwrap_or_default(),
-                thread_id,
+                thread_id.map(ThreadId::as_str),
                 observation.cwd.clone(),
                 observation.model.clone(),
                 observation.event.clone(),
                 observation.cost_usd,
                 sql_count(observation.context_used_tokens),
                 sql_count(observation.context_limit_tokens),
-                now()
+                now().as_str()
             ],
         )?;
         if let Some(plan) = &observation.plan
             && (plan.five_hour_percent.is_some() || plan.week_percent.is_some())
         {
             self.upsert_plan_usage(
-                &observation.harness,
+                observation.harness,
                 PlanUsageFields {
                     plan_five_hour_percent: plan.five_hour_percent,
                     plan_five_hour_resets_at: plan.five_hour_resets_at.clone(),
@@ -65,8 +66,8 @@ impl Store {
             (),
             |row| {
                 Ok(HookLastSeen {
-                    harness: row.get(0)?,
-                    observed_at: row.get(1)?,
+                    harness: row.get::<String>(0)?.parse()?,
+                    observed_at: text(row, 1)?,
                 })
             },
         )
@@ -79,22 +80,21 @@ mod tests {
 
     use libsql::params;
 
-    use crate::domain::{Observation, PlanWindows};
+    use crate::domain::{HarnessKind, Observation, PlanWindows};
     use crate::store::fixtures::{test_store, test_thread};
 
     fn observation(session: &str) -> Observation {
         Observation {
-            harness: "claude".into(),
             native_session: Some(session.into()),
-            ..Observation::default()
+            ..Observation::new(HarnessKind::Claude)
         }
     }
 
-    fn cost_of(store: &crate::store::Store, harness: &str, session: &str) -> Option<f64> {
+    fn cost_of(store: &crate::store::Store, harness: HarnessKind, session: &str) -> Option<f64> {
         store
             .query_optional(
                 "SELECT cost_usd FROM hook_observations WHERE harness = ?1 AND native_session = ?2",
-                params![harness, session],
+                params![harness.as_str(), session],
                 |row| Ok(row.get::<Option<f64>>(0)?),
             )
             .unwrap()
@@ -124,7 +124,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(cost_of(&store, "claude", "s1"), Some(1.5));
+        assert_eq!(cost_of(&store, HarnessKind::Claude, "s1"), Some(1.5));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -143,7 +143,7 @@ mod tests {
                 .unwrap();
         }
 
-        assert_eq!(cost_of(&store, "claude", "s1"), Some(2.0));
+        assert_eq!(cost_of(&store, HarnessKind::Claude, "s1"), Some(2.0));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -163,7 +163,7 @@ mod tests {
         store
             .record_observation(
                 &Observation {
-                    harness: "opencode".into(),
+                    harness: HarnessKind::OpenCode,
                     cost_usd: Some(9.0),
                     ..observation("s1")
                 },
@@ -172,8 +172,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.hooks_last_seen().unwrap().len(), 2);
-        assert_eq!(cost_of(&store, "claude", "s1"), Some(1.0));
-        assert_eq!(cost_of(&store, "opencode", "s1"), Some(9.0));
+        assert_eq!(cost_of(&store, HarnessKind::Claude, "s1"), Some(1.0));
+        assert_eq!(cost_of(&store, HarnessKind::OpenCode, "s1"), Some(9.0));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -194,7 +194,7 @@ mod tests {
             )
             .unwrap();
 
-        let plan = store.plan_usage("claude").unwrap().unwrap();
+        let plan = store.plan_usage(HarnessKind::Claude).unwrap().unwrap();
         assert_eq!(plan.plan_five_hour_percent, Some(23.5));
         fs::remove_dir_all(root).unwrap();
     }
@@ -224,7 +224,7 @@ mod tests {
             )
             .unwrap();
 
-        let plan = store.plan_usage("claude").unwrap().unwrap();
+        let plan = store.plan_usage(HarnessKind::Claude).unwrap().unwrap();
         assert_eq!(plan.plan_week_percent, Some(40.0));
         fs::remove_dir_all(root).unwrap();
     }

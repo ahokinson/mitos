@@ -1,9 +1,8 @@
 import { CodeRenderable, type ColorInput, type MarkdownOptions } from "@opentui/core";
 import { For, Show } from "solid-js";
 
-import { eventDiffs } from "@session/diffs.ts";
 import { EventKind, type ThreadEvent, eventPresentation, eventText } from "@session/events.ts";
-import { ToolKind, isQuietResult, toolCall, toolGlyph, toolResult, toolTone } from "@session/tools.ts";
+import { ToolKind, ToolShape, isQuietResult, toolCall, toolGlyph, toolResult, toolTone } from "@session/tools.ts";
 import { BOLD, Tone } from "@theme/themes.ts";
 import { useSyntaxStyle, useTheme } from "@theme/providers.tsx";
 import { DiffRows } from "@widgets/conversation/diffRows.tsx";
@@ -20,8 +19,7 @@ export function isToolEvent(event: ThreadEvent): boolean {
 }
 
 function isClaudeResult(event: ThreadEvent): boolean {
-  const payload = event.payload as { type?: unknown } | null | undefined;
-  return event.kind === EventKind.ToolResult && payload?.type === "tool_result";
+  return event.kind === EventKind.ToolResult && event.tool?.shape === ToolShape.ToolResult;
 }
 
 function toneColor(tone: Tone, theme: ReturnType<typeof useTheme>): ColorInput | undefined {
@@ -117,7 +115,7 @@ export function EventRow(props: { event: ThreadEvent; grouped?: boolean; folded?
 
   if (isToolEvent(props.event)) {
     if (props.folded) return null;
-    const diffs = () => (props.event.kind === EventKind.ToolCall || isClaudeResult(props.event) ? eventDiffs(props.event) : []);
+    const diffs = () => (props.event.kind === EventKind.ToolCall || isClaudeResult(props.event) ? (props.event.diffs ?? []) : []);
     const isResult = () => props.event.kind === EventKind.ToolResult;
     const quiet = () => isQuietResult(props.event);
     const result = () => toolResult(props.event.content);

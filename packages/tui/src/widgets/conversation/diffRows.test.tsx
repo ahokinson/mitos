@@ -1,14 +1,26 @@
 import { expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
 
-import { diffTexts } from "@session/diffs.ts";
+import type { FileDiff } from "@session/diffs.ts";
 import { resolveTheme } from "@theme/palettes.ts";
 import { ThemeProvider } from "@theme/providers.tsx";
 import { DiffRows } from "@widgets/conversation/diffRows.tsx";
 
+function replacement(path: string, before: string, after: string): FileDiff {
+  const removed = before.trimEnd().split("\n");
+  const added = after.trimEnd().split("\n");
+  const header = `@@ -1,${removed.length} +1,${added.length} @@`;
+  return {
+    path,
+    diff: [`--- a/${path}`, `+++ b/${path}`, header, ...removed.map((line) => `-${line}`), ...added.map((line) => `+${line}`), ""].join("\n"),
+    added: added.length,
+    removed: removed.length,
+    truncated: 0,
+  };
+}
+
 async function fgsOf(path: string, before: string, after: string): Promise<Set<string>> {
-  const diff = diffTexts(path, before, after);
-  if (!diff) throw new Error("no diff");
+  const diff = replacement(path, before, after);
   const setup = await testRender(
     () => (
       <ThemeProvider theme={resolveTheme({ name: "mocha" })}>

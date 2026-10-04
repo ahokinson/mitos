@@ -1,4 +1,4 @@
-//! Drives the real `mitos` binary against a fake external adapter.
+//! Drives the real `mitos` binary against a fake `claude` program on `PATH`.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -20,60 +20,33 @@ fn spawns() -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-const FAKE_ADAPTER: &str = r#"#!/bin/sh
+const FAKE_CLAUDE: &str = r#"#!/bin/sh
 here=$(dirname "$0")
+if [ "$1" != "-p" ]; then
+  echo harness-ran
+  exit "$(cat "$here/launch-code" 2>/dev/null || echo 0)"
+fi
 read -r request
+if [ -f "$here/crash" ]; then exit 2; fi
+transcripts="$HOME/.claude/projects/fake"
+mkdir -p "$transcripts"
+echo '{"type":"system","session_id":"fake-session"}'
 case "$request" in
-  *'"action":"negotiate"'*)
-    if [ -f "$here/bad-version" ]; then
-      echo '{"protocol_version":99,"kind":"capabilities","capabilities":{"headless":true}}'
-    elif [ -f "$here/garbage" ]; then
-      echo 'not json'
-    elif [ -f "$here/no-headless" ]; then
-      echo '{"protocol_version":1,"kind":"capabilities","capabilities":{"headless":false}}'
-    elif [ -f "$here/crash" ]; then
-      exit 1
-    else
-      echo '{"protocol_version":1,"kind":"capabilities","capabilities":{"headless":true,"modes":["plan"],"ask_back":false}}'
-    fi ;;
-  *'"action":"prepare_launch"'*)
-    if [ -f "$here/empty-program" ]; then
-      echo '{"protocol_version":1,"kind":"launch","program":"","native_session":null}'
-    elif [ -f "$here/wrong-kind" ]; then
-      echo '{"protocol_version":1,"kind":"nope","program":"/bin/sh","native_session":null}'
-    else
-      args=$(cat "$here/launch-args" 2>/dev/null || echo '["-c","echo harness-ran"]')
-      echo "{\"protocol_version\":1,\"kind\":\"launch\",\"program\":\"/bin/sh\",\"args\":$args,\"env\":{\"FAKE\":\"1\"},\"native_session\":\"fake-session\"}"
-    fi ;;
-  *'"action":"collect_handoff"'*)
-    if [ -f "$here/collect-fail" ]; then exit 1; fi
-    echo '{"protocol_version":1,"kind":"handoff","native_session":"fake-session","transcript":{"messages":[{"role":"user","text":"from the harness"},{"role":"assistant","text":"harness reply"}]},"usage":{"input_tokens":10,"output_tokens":5,"cached_input_tokens":2,"cost_usd":0.5,"model":"fake-model","turns":1,"plan_five_hour_percent":12.5,"plan_five_hour_resets_at":"2026-10-04T05:00:00Z","plan_week_percent":3.0,"plan_week_resets_at":"2026-10-09T00:00:00Z"}}' ;;
-  *'"action":"start_thread"'*|*'"action":"send_message"'*|*'"action":"attach_thread"'*)
-    if [ -f "$here/stream-garbage" ]; then echo 'not json'; exit 0; fi
-    if [ -f "$here/stream-unknown" ]; then echo '{"event":"mystery"}'; exit 0; fi
-    echo '{"event":"status","content":"working"}'
-    case "$request" in
-      *'"text":"ask'*)
-        echo '{"event":"request","payload":{"id":"native-1","kind":"permission","title":"Bash ls"}}' ;;
-    esac
-    echo '{"event":"tool_call","content":"Bash","payload":{"name":"Bash"}}'
-    echo '{"event":"tool_result","content":"ok"}'
-    echo '{"event":"assistant_delta","content":"hello"}'
-    echo '{"event":"assistant_message","role":"assistant","content":"hello from fake"}'
-    echo '{"event":"usage","usage":{"input_tokens":3,"output_tokens":4,"context_used_tokens":100,"context_limit_tokens":1000,"model":"fake-model","plan_five_hour_percent":10.0,"plan_five_hour_resets_at":"2026-10-04T05:00:00Z"}}'
-    echo '{"event":"native_session_update","native_session":"fake-session"}'
-    if [ -f "$here/stream-fail" ]; then exit 2; fi
-    echo '{"event":"turn_complete"}' ;;
-  *'"action":"detach_thread"'*)
-    if [ -f "$here/detach-fail" ]; then exit 1; fi
-    echo '{}' ;;
+  *ask*)
+    echo '{"type":"control_request","request_id":"native-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}' ;;
 esac
+echo '{"type":"assistant","message":{"role":"assistant","model":"fake-model","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}'
+echo '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}'
+echo '{"type":"assistant","message":{"role":"assistant","model":"fake-model","content":[{"type":"text","text":"hello from fake"}],"usage":{"input_tokens":3,"output_tokens":4}}}'
+echo '{"type":"result","total_cost_usd":0.5,"usage":{"input_tokens":3,"output_tokens":4}}'
+echo '{"type":"user","message":{"role":"user","content":"from the harness"}}' >> "$transcripts/fake-session.jsonl"
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"harness reply"}]}}' >> "$transcripts/fake-session.jsonl"
 "#;
 
 struct Workbench {
     root: PathBuf,
     state: PathBuf,
-    adapters: PathBuf,
+    bin: PathBuf,
     home: PathBuf,
     workspace: PathBuf,
 }
@@ -83,7 +56,7 @@ impl Workbench {
         let root = std::env::temp_dir().join(format!("mitos-commands-{}", unique()));
         let workbench = Self {
             state: root.join("state"),
-            adapters: root.join("adapters"),
+            bin: root.join("bin"),
             home: root.join("home"),
             workspace: root.join("workspace"),
             root,
@@ -91,14 +64,22 @@ impl Workbench {
         let _guard = spawns();
         for directory in [
             &workbench.state,
-            &workbench.adapters,
+            &workbench.bin,
             &workbench.home,
             &workbench.workspace,
         ] {
             fs::create_dir_all(directory).unwrap();
         }
-        Self::script(&workbench.adapters.join("mitos-fake"), FAKE_ADAPTER);
+        Self::script(&workbench.bin.join("claude"), FAKE_CLAUDE);
         workbench
+    }
+
+    fn path(&self) -> std::ffi::OsString {
+        let mut paths = vec![self.bin.clone()];
+        paths.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        std::env::join_paths(paths).unwrap()
     }
 
     fn script(path: &Path, body: &str) {
@@ -107,11 +88,7 @@ impl Workbench {
     }
 
     fn flag(&self, name: &str) {
-        fs::write(self.adapters.join(name), "").unwrap();
-    }
-
-    fn unflag(&self, name: &str) {
-        let _ = fs::remove_file(self.adapters.join(name));
+        fs::write(self.bin.join(name), "").unwrap();
     }
 
     fn command(&self) -> Command {
@@ -119,7 +96,7 @@ impl Workbench {
         command
             .current_dir(&self.workspace)
             .env("MITOS_STATE_DIR", &self.state)
-            .env("MITOS_ADAPTER_DIR", &self.adapters)
+            .env("PATH", self.path())
             .env("HOME", &self.home)
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("CLAUDE_CONFIG_DIR")
@@ -180,7 +157,7 @@ impl Workbench {
     }
 
     fn new_thread(&self) -> String {
-        self.json(&["thread", "new", "--harness", "fake"])["id"]
+        self.json(&["thread", "new", "--harness", "claude"])["id"]
             .as_str()
             .unwrap()
             .to_owned()
@@ -241,7 +218,7 @@ fn kinds(events: &[Value]) -> Vec<&str> {
 #[test]
 fn a_thread_runs_a_turn_and_lists_its_events() {
     let bench = Workbench::new();
-    let created = bench.ok(&["thread", "new", "--harness", "fake"]);
+    let created = bench.ok(&["thread", "new", "--harness", "claude"]);
     assert!(created.starts_with("Created thread "));
     let id = created
         .trim()
@@ -249,7 +226,7 @@ fn a_thread_runs_a_turn_and_lists_its_events() {
         .to_owned();
 
     let listing = bench.ok(&["thread", "list"]);
-    assert!(listing.contains(&id) && listing.contains("[fake]") && listing.contains("active"));
+    assert!(listing.contains(&id) && listing.contains("[claude]") && listing.contains("active"));
     assert_eq!(bench.json(&["thread", "list"]).as_array().unwrap().len(), 1);
 
     let sent = bench.ok(&["thread", "send", &id, "--message", "hello"]);
@@ -261,7 +238,6 @@ fn a_thread_runs_a_turn_and_lists_its_events() {
         "user_message",
         "tool_call",
         "tool_result",
-        "assistant_delta",
         "assistant_message",
         "usage",
     ] {
@@ -347,19 +323,6 @@ fn modes_switch_and_are_enforced_by_capabilities() {
 }
 
 #[test]
-fn a_harness_without_headless_mode_is_refused() {
-    let bench = Workbench::new();
-    let id = bench.new_thread();
-    bench.flag("no-headless");
-    assert!(
-        bench
-            .err(&["thread", "send", &id, "--message", "hi"])
-            .contains("no headless mode")
-    );
-    assert!(bench.ok(&["thread", "attach", &id]).is_empty());
-}
-
-#[test]
 fn reassigning_and_compacting_rebind_the_thread() {
     let bench = Workbench::new();
     let id = bench.new_thread();
@@ -367,7 +330,7 @@ fn reassigning_and_compacting_rebind_the_thread() {
 
     assert!(
         bench
-            .ok(&["thread", "reassign", &id, "--to", "fake"])
+            .ok(&["thread", "reassign", &id, "--to", "claude"])
             .contains("Reassigned")
     );
     assert!(
@@ -386,19 +349,6 @@ fn reassigning_and_compacting_rebind_the_thread() {
     assert!(kinds.contains(&"compaction"));
     assert!(kinds.contains(&"handoff_carryover"));
     assert!(kinds.contains(&"harness_unbound"));
-}
-
-#[test]
-fn reassigning_fails_cleanly_when_collection_fails() {
-    let bench = Workbench::new();
-    let id = bench.new_thread();
-    bench.ok(&["thread", "send", &id, "--message", "hello"]);
-    bench.flag("collect-fail");
-    assert!(
-        bench
-            .err(&["thread", "reassign", &id, "--to", "fake"])
-            .contains("adapter fake exited")
-    );
 }
 
 #[test]
@@ -432,19 +382,28 @@ fn archiving_and_deleting_detach_the_harness() {
     );
     let remaining = bench.json(&["thread", "list"]);
     assert_eq!(remaining.as_array().unwrap().len(), 1);
+}
 
-    let failing = bench.new_thread();
-    bench.flag("detach-fail");
-    assert!(
-        bench
-            .err(&["thread", "archive", &failing])
-            .contains("exited")
-    );
-    assert!(
-        bench
-            .err(&["thread", "delete", &failing])
-            .contains("exited")
-    );
+#[test]
+fn answer_flags_are_checked_before_the_turn_is_contacted() {
+    let bench = Workbench::new();
+    let id = bench.new_thread();
+    bench.ok(&["thread", "send", &id, "--message", "hello"]);
+    bench.ok(&["thread", "send", &id, "--message", "ask permission"]);
+    let request = bench.json(&["thread", "requests", &id])[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let answer = |flags: &[&str]| {
+        let mut args = vec!["thread", "answer", &id, "--request", &request];
+        args.extend_from_slice(flags);
+        bench.err(&args)
+    };
+
+    assert!(answer(&["--text", "yes"]).contains("takes approve or deny"));
+    assert!(answer(&[]).contains("provide --approve, --deny, --text, or --response"));
+    assert!(answer(&["--approve", "--deny"]).contains("cannot be used with"));
+    assert!(answer(&["--approve"]).contains("no longer running"));
 }
 
 #[test]
@@ -526,42 +485,26 @@ fn requests_are_listed_and_answers_fail_once_the_turn_is_gone() {
 }
 
 #[test]
-fn adapter_failures_surface_as_errors() {
+fn a_crashing_harness_surfaces_as_an_error_event() {
     let bench = Workbench::new();
     let id = bench.new_thread();
-    for (flag, expected) in [
-        ("bad-version", "protocol version 99"),
-        ("garbage", "valid negotiate JSON"),
-        ("crash", "exited with"),
-    ] {
-        bench.flag(flag);
-        let message = bench.err(&["thread", "send", &id, "--message", "hi"]);
-        assert!(message.contains(expected), "{flag}: {message}");
-        bench.unflag(flag);
-    }
-    for (flag, expected) in [
-        ("stream-garbage", "invalid event JSON"),
-        ("stream-unknown", "unknown event kind"),
-        ("stream-fail", "exited with"),
-    ] {
-        bench.flag(flag);
-        let message = bench.err(&["thread", "send", &id, "--message", "hi"]);
-        assert!(message.contains(expected), "{flag}: {message}");
-        bench.unflag(flag);
-    }
+    bench.flag("crash");
+    bench.ok(&["thread", "send", &id, "--message", "hi"]);
+    assert!(bench.events(&id).iter().any(|event| {
+        event["kind"] == "error"
+            && event["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("exited with code 2"))
+    }));
 }
 
 #[test]
-fn an_adapter_that_does_not_exist_is_reported() {
+fn an_unknown_harness_is_rejected() {
     let bench = Workbench::new();
-    let id = bench.json(&["thread", "new", "--harness", "missing"])["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
     assert!(
         bench
-            .err(&["thread", "send", &id, "--message", "hi"])
-            .contains("could not start adapter missing")
+            .err(&["thread", "new", "--harness", "missing"])
+            .contains("unknown harness")
     );
 }
 
@@ -579,11 +522,12 @@ fn views_report_workspace_state_as_json() {
     assert!(threads.contains("remember this"));
     let history = bench.ok(&["view", "history", "--workspace-key", &key, "--limit", "5"]);
     assert!(history.contains("remember this"));
-    let usage = bench.ok(&["view", "usage", &id, "--harness", "fake"]);
-    assert!(usage.contains("fake-model"));
+    let usage: Value =
+        serde_json::from_str(&bench.ok(&["view", "usage", &id, "--harness", "claude"])).unwrap();
+    assert!(usage["output_tokens"].as_u64().unwrap() > 0);
     assert_eq!(
         bench
-            .ok(&["view", "usage", &id, "--harness", "other"])
+            .ok(&["view", "usage", &id, "--harness", "codex"])
             .trim(),
         "null"
     );
@@ -788,9 +732,7 @@ fn the_packaged_tui_is_looked_up_under_the_library_dir() {
 /// Built-in adapters, with no harness program anywhere on `PATH`.
 fn native(bench: &Workbench) -> Command {
     let mut command = bench.command();
-    command
-        .env_remove("MITOS_ADAPTER_DIR")
-        .env("PATH", bench.root.join("empty-path"));
+    command.env("PATH", bench.root.join("empty-path"));
     command
 }
 
@@ -889,7 +831,7 @@ fn enter_in_pty(bench: &Workbench, args: &[&str]) -> (String, bool) {
     command.cwd(&bench.workspace);
     command.env("MITOS_STATE_DIR", &bench.state);
     command.env("HOME", &bench.home);
-    command.env("MITOS_ADAPTER_DIR", &bench.adapters);
+    command.env("PATH", bench.path());
     let mut child = pair.slave.spawn_command(command).unwrap();
     drop(pair.slave);
     let mut reader = pair.master.try_clone_reader().unwrap();
@@ -919,7 +861,7 @@ fn entering_a_native_harness_hands_off_runs_and_records_notes() {
         &bench,
         &[
             "enter",
-            "fake",
+            "claude",
             "--thread",
             &id,
             "--note",
@@ -929,9 +871,9 @@ fn entering_a_native_harness_hands_off_runs_and_records_notes() {
         ],
     );
     assert!(success, "{output}");
-    assert!(output.contains("Mitos handoff to fake"), "{output}");
+    assert!(output.contains("Mitos handoff to claude"), "{output}");
     assert!(output.contains("harness-ran"), "{output}");
-    assert!(output.contains("fake exited."), "{output}");
+    assert!(output.contains("claude exited."), "{output}");
     assert!(
         bench
             .events(&id)
@@ -939,27 +881,8 @@ fn entering_a_native_harness_hands_off_runs_and_records_notes() {
             .any(|e| e["content"] == "back from the harness")
     );
 
-    fs::write(bench.adapters.join("launch-args"), r#"["-c","exit 3"]"#).unwrap();
-    let (output, success) = enter_in_pty(&bench, &["enter", "fake", "--thread", &id]);
+    fs::write(bench.bin.join("launch-code"), "3").unwrap();
+    let (output, success) = enter_in_pty(&bench, &["enter", "claude", "--thread", &id]);
     assert!(success, "{output}");
-    assert!(output.contains("fake exited with"), "{output}");
-
-    bench.flag("collect-fail");
-    let (output, _) = enter_in_pty(&bench, &["enter", "fake", "--thread", &id]);
-    assert!(
-        output.contains("could not mine the fake handoff"),
-        "{output}"
-    );
-}
-
-#[test]
-fn entering_with_a_bad_launch_plan_fails() {
-    let bench = Workbench::new();
-    let id = bench.new_thread();
-    for flag in ["empty-program", "wrong-kind"] {
-        bench.flag(flag);
-        let (output, success) = enter_in_pty(&bench, &["enter", "fake", "--thread", &id]);
-        assert!(!success, "{flag}: {output}");
-        bench.unflag(flag);
-    }
+    assert!(output.contains("claude exited with"), "{output}");
 }

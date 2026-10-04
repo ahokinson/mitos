@@ -16,7 +16,7 @@ class Mitos < Formula
 
   def caveats
     <<~EOS
-      mitos runs its TUI and harness adapters through bun at runtime
+      mitos runs its TUI through bun at runtime
       (already installed as a dependency of this formula).
     EOS
   end

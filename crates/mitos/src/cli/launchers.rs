@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Result, anyhow, bail};
 
-use crate::adapters::tui_command;
+use super::tuis::tui_command;
 use crate::git::Checkout;
 
 pub fn launch_tui(state_dir: Option<PathBuf>) -> Result<()> {

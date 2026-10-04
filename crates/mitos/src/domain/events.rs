@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::{HarnessKind, ThreadId, Timestamp, TurnId};
+
 string_enum! {
     /// Mirrors the `thread_events.kind` CHECK constraint in `0001_init.sql`.
     enum EventKind("event kind") {
@@ -28,21 +30,21 @@ string_enum! {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ThreadEvent {
-    pub thread_id: String,
+    pub thread_id: ThreadId,
     pub seq: i64,
-    pub turn_id: Option<String>,
-    pub harness: Option<String>,
+    pub turn_id: Option<TurnId>,
+    pub harness: Option<HarnessKind>,
     pub kind: EventKind,
     pub role: Option<String>,
     pub content: Option<String>,
     pub payload: Option<Value>,
-    pub created_at: String,
+    pub created_at: Timestamp,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct NewThreadEvent {
-    pub turn_id: Option<String>,
-    pub harness: Option<String>,
+    pub turn_id: Option<TurnId>,
+    pub harness: Option<HarnessKind>,
     pub kind: Option<EventKind>,
     pub role: Option<String>,
     pub content: Option<String>,

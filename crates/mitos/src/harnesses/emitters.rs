@@ -42,10 +42,6 @@ impl<'a, 'b> Emitter<'a, 'b> {
         (self.on_event)(event)
     }
 
-    pub fn finished(&self) -> bool {
-        self.finished
-    }
-
     pub fn native_session(&self) -> Option<&Value> {
         self.native_session.as_ref()
     }

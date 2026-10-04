@@ -28,7 +28,7 @@ brew install --HEAD ahokinson/mitos/mitos
 
 Either way, `bin/mitos` and `lib/mitos/` end up as siblings under the same
 prefix, which is how `mitos` finds its own TUI at runtime
-(`crates/mitos/src/adapters/resolvers.rs`). A packaged install needs no
+(`crates/mitos/src/cli/tuis.rs`). A packaged install needs no
 `MITOS_LIBRARY_DIR` setting.
 
 A packaged installation needs `bun` on `PATH` (or `MITOS_BUN`).

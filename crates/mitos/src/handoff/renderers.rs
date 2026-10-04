@@ -3,7 +3,7 @@ use std::fmt::Write as _;
 use anyhow::Result;
 
 use super::{HandoffFacts, HandoffRenderer};
-use crate::domain::EventKind;
+use crate::domain::{EventKind, HarnessKind, ThreadId};
 
 pub const PREAMBLE_PREFIX: &str = "You are joining Mitos session ";
 
@@ -81,7 +81,7 @@ impl Sections {
                 EventKind::Note => (
                     format!(
                         "- Note from {}: {content}",
-                        event.harness.as_deref().unwrap_or("Mitos")
+                        event.harness.map_or("Mitos", HarnessKind::as_str)
                     ),
                     None,
                 ),
@@ -100,7 +100,7 @@ impl Sections {
         sections
     }
 
-    fn assemble(&self, thread_id: &str, pruned: bool) -> String {
+    fn assemble(&self, thread_id: &ThreadId, pruned: bool) -> String {
         let mut output = format!(
             "{PREAMBLE_PREFIX}{thread_id}. The conversation so far follows; reply to the final user message.\n\n"
         );
@@ -181,7 +181,7 @@ mod tests {
             role: role.map(Into::into),
             content: Some(content.into()),
             payload: None,
-            created_at: String::new(),
+            created_at: "".into(),
         }
     }
 

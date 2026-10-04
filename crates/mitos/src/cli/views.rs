@@ -14,6 +14,6 @@ pub fn dispatch(service: &ThreadService<'_>, command: ViewCommand) -> Result<()>
             limit,
         } => emit_json(&service.recent_user_messages(&workspace_key, limit)?),
         ViewCommand::Empty { id } => emit_json(&service.is_thread_empty(&id)?),
-        ViewCommand::Usage { id, harness } => emit_json(&service.latest_usage(&id, &harness)?),
+        ViewCommand::Usage { id, harness } => emit_json(&service.latest_usage(&id, harness)?),
     }
 }

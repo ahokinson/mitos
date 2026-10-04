@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use super::ThreadService;
 use super::notes::ThreadNotes;
-use crate::domain::UnbindReason;
+use crate::domain::{HarnessKind, ThreadId, UnbindReason};
 use crate::git::Checkout;
 use crate::ports::HarnessAdapter;
 use crate::store::StoreLock;
@@ -16,8 +16,8 @@ pub struct Entry {
     pub launch: LaunchPlan,
     pub context: String,
     pub workdir: PathBuf,
-    thread_id: String,
-    harness: String,
+    thread_id: ThreadId,
+    harness: HarnessKind,
     workspace_root: String,
     _lock: StoreLock,
 }
@@ -26,8 +26,8 @@ impl ThreadService<'_> {
     /// The returned entry holds the thread lock until `finish_entry`.
     pub fn begin_entry<A: HarnessAdapter>(
         &self,
-        thread_id: &str,
-        harness: &str,
+        thread_id: &ThreadId,
+        harness: HarnessKind,
         native_session: Option<String>,
         adapter: &A,
     ) -> Result<Entry> {
@@ -35,12 +35,12 @@ impl ThreadService<'_> {
         let lock = self.store.lock_thread(&thread.id)?;
         let workspace = self.store.get_workspace(&thread.workspace_id)?;
         let checkout = Checkout::open(&workspace.root)?;
-        let from_harness = thread.active_harness.clone();
+        let from_harness = thread.active_harness;
 
-        if from_harness.as_deref() != Some(harness) {
+        if from_harness != Some(harness) {
             self.collect_handoff_evidence(&thread, &workspace.root, adapter)?;
             if let Some(from) = from_harness {
-                self.unbind_harness(&thread.id, &from, UnbindReason::Reassigned)?;
+                self.unbind_harness(&thread.id, from, UnbindReason::Reassigned)?;
             }
         }
 
@@ -54,27 +54,23 @@ impl ThreadService<'_> {
         let thread = self.store.get_thread(&thread.id)?;
 
         let context = self.render_launch_handoff(&thread)?;
-        let target_native_session = (thread.active_harness.as_deref() == Some(harness))
+        let target_native_session = (thread.active_harness == Some(harness))
             .then_some(thread.native_session.clone())
             .flatten();
-        let request = AdapterRequest::prepare_launch(
-            harness,
-            checkout.root(),
-            context.clone(),
-            target_native_session,
-        );
+        let request =
+            AdapterRequest::prepare_launch(harness, context.clone(), target_native_session);
         let mut launch = adapter.prepare_launch(&request)?;
         // Hooks the harness fires inherit this, so `mitos hook` knows the thread.
         launch
             .env
-            .insert("MITOS_THREAD_ID".into(), thread.id.clone());
+            .insert("MITOS_THREAD_ID".into(), thread.id.to_string());
         self.bind_harness(&thread.id, harness, launch.native_session.as_ref())?;
         Ok(Entry {
             launch,
             context,
             workdir: checkout.root().to_path_buf(),
             thread_id: thread.id,
-            harness: harness.into(),
+            harness,
             workspace_root: workspace.root,
             _lock: lock,
         })
@@ -98,7 +94,7 @@ impl ThreadService<'_> {
         let mining_failure = self
             .collect_handoff_evidence(&current, &workspace_root, adapter)
             .err();
-        self.record_notes(&thread_id, Some(&harness), notes)?;
+        self.record_notes(&thread_id, Some(harness), notes)?;
         drop(lock);
         Ok(mining_failure)
     }

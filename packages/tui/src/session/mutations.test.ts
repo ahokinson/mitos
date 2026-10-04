@@ -16,6 +16,7 @@ import {
   sendMessage,
   setMode,
 } from "@session/mutations.ts";
+import { Decision } from "@session/requests.ts";
 import { CompactMode, ThreadMode } from "@session/threads.ts";
 
 let dir: string;
@@ -101,8 +102,8 @@ const voidMutations: [string, () => Promise<void>, string, string][] = [
   ],
   [
     "answerRequest",
-    () => answerRequest("t1", "r1", { allow: true }),
-    'thread|answer|t1|--request|r1|--response|{"allow":true}|',
+    () => answerRequest("t1", "r1", { decision: Decision.Approve }),
+    "thread|answer|t1|--request|r1|--approve|",
     "Could not answer request",
   ],
   [
@@ -126,6 +127,17 @@ for (const [name, invoke, expected, fallback] of voidMutations) {
     await expect(invoke()).rejects.toThrow("from stderr");
   });
 }
+
+test("answerRequest sends the decision and any text as flags", async () => {
+  await answerRequest("t1", "r1", { decision: Decision.Deny, text: "too big" });
+  await answerRequest("t1", "r2", { text: "blue" });
+  await answerRequest("t1", "r3", { decision: Decision.Deny, text: "  " });
+  expect(await calls()).toEqual([
+    "thread|answer|t1|--request|r1|--deny|--text|too big|",
+    "thread|answer|t1|--request|r2|--text|blue|",
+    "thread|answer|t1|--request|r3|--deny|",
+  ]);
+});
 
 test("noteThread forwards notes, decisions and questions", async () => {
   await noteThread("t1", {

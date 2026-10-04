@@ -3,15 +3,14 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 
-use crate::domain::{CompactMode, ThreadMode};
-use crate::hooks::HARNESSES;
+use crate::domain::{CompactMode, HarnessKind, RequestId, ThreadId, ThreadMode, TurnId};
 use crate::service::ThreadNotes;
 
 fn harness_candidates() -> ArgValueCandidates {
     ArgValueCandidates::new(|| {
-        HARNESSES
-            .iter()
-            .map(|name| CompletionCandidate::new(*name))
+        HarnessKind::ALL
+            .into_iter()
+            .map(|harness| CompletionCandidate::new(harness.as_str()))
             .collect::<Vec<_>>()
     })
 }
@@ -38,9 +37,10 @@ impl From<NoteArgs> for ThreadNotes {
 
 #[derive(Debug, Args)]
 pub struct EnterArgs {
-    pub(super) harness: String,
+    #[arg(add = harness_candidates())]
+    pub(super) harness: HarnessKind,
     #[arg(long)]
-    pub(super) thread: String,
+    pub(super) thread: ThreadId,
     #[command(flatten)]
     pub(super) notes: NoteArgs,
     #[arg(long)]
@@ -75,12 +75,12 @@ pub enum ViewCommand {
         limit: usize,
     },
     /// Whether a thread has recorded nothing beyond its own setup events.
-    Empty { id: String },
+    Empty { id: ThreadId },
     /// A thread's latest context and cumulative usage under a harness, or null.
     Usage {
-        id: String,
+        id: ThreadId,
         #[arg(long, add = harness_candidates())]
-        harness: String,
+        harness: HarnessKind,
     },
 }
 
@@ -105,7 +105,7 @@ pub enum HooksCommand {
 pub enum ThreadCommand {
     New {
         #[arg(long, add = harness_candidates())]
-        harness: Option<String>,
+        harness: Option<HarnessKind>,
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
         #[arg(long)]
@@ -118,64 +118,72 @@ pub enum ThreadCommand {
         json: bool,
     },
     Send {
-        id: String,
+        id: ThreadId,
         #[arg(long)]
         message: String,
     },
     Sync {
-        id: String,
+        id: ThreadId,
         #[arg(long, default_value_t = 0)]
         since: i64,
         #[arg(long)]
         json: bool,
     },
     Reassign {
-        id: String,
-        #[arg(long = "to")]
-        to: String,
+        id: ThreadId,
+        #[arg(long = "to", add = harness_candidates())]
+        to: HarnessKind,
     },
     /// Rebuild the thread's native session from a trimmed or summarized context.
     Compact {
-        id: String,
+        id: ThreadId,
         #[arg(long, default_value = "mechanical")]
         mode: CompactMode,
     },
     Attach {
-        id: String,
+        id: ThreadId,
     },
     Archive {
-        id: String,
+        id: ThreadId,
     },
     /// Permanently removes the thread and all its rows; unlike `archive`, not recoverable.
     Delete {
-        id: String,
+        id: ThreadId,
     },
     Note {
-        id: String,
+        id: ThreadId,
         #[command(flatten)]
         notes: NoteArgs,
     },
     Drive {
-        id: String,
+        id: ThreadId,
         #[arg(long)]
-        turn: String,
+        turn: TurnId,
     },
     /// Set the thread's mode; takes effect on the next turn.
     Mode {
-        id: String,
+        id: ThreadId,
         mode: ThreadMode,
     },
     /// Answer a pending harness request; the response is JSON or plain text.
     Answer {
-        id: String,
+        id: ThreadId,
         #[arg(long = "request")]
-        request: String,
-        #[arg(long)]
-        response: String,
+        request: RequestId,
+        #[arg(long, conflicts_with_all = ["deny", "text", "response"])]
+        approve: bool,
+        /// With `--text`, the reason given to the harness.
+        #[arg(long, conflicts_with_all = ["approve", "response"])]
+        deny: bool,
+        #[arg(long, conflicts_with_all = ["approve", "response"])]
+        text: Option<String>,
+        /// The raw response, for a harness whose shape the flags don't cover.
+        #[arg(long, conflicts_with_all = ["approve", "deny", "text"])]
+        response: Option<String>,
     },
     /// List the thread's pending harness requests.
     Requests {
-        id: String,
+        id: ThreadId,
         #[arg(long)]
         json: bool,
     },

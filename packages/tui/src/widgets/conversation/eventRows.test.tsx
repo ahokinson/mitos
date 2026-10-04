@@ -1,12 +1,28 @@
 import { expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
 
+import type { FileDiff } from "@session/diffs.ts";
 import { EventKind, type ThreadEvent } from "@session/events.ts";
+import { ToolKind, type ToolFacts, ToolShape } from "@session/tools.ts";
 import { resolveTheme } from "@theme/palettes.ts";
 import { ThemeProvider } from "@theme/providers.tsx";
 import { EventRow } from "@widgets/conversation/eventRows.tsx";
 
-function toolEvent(kind: EventKind, payload: unknown): ThreadEvent {
+function facts(overrides: Partial<ToolFacts>): ToolFacts {
+  return {
+    kind: ToolKind.Other,
+    name: null,
+    argument: "",
+    tool_use_id: null,
+    path: null,
+    shape: ToolShape.Other,
+    quiet: false,
+    patched: false,
+    ...overrides,
+  };
+}
+
+function toolEvent(kind: EventKind, payload: unknown, tool?: Partial<ToolFacts>): ThreadEvent {
   return {
     thread_id: "t1",
     seq: 1,
@@ -17,6 +33,7 @@ function toolEvent(kind: EventKind, payload: unknown): ThreadEvent {
     content: "Edit",
     payload,
     created_at: "2026-01-01T00:00:00Z",
+    ...(tool ? { tool: facts(tool) } : {}),
   };
 }
 
@@ -51,10 +68,20 @@ const resultPayload = {
   },
 };
 
+const resultDiffs: FileDiff[] = [
+  { path: "src/a.ts", diff: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-oldValue\n+newValue\n", added: 1, removed: 1, truncated: 0 },
+];
+
 test("a file-edit tool result renders its header and diff, not the confirmation", async () => {
   const frame = await frameOf({
-    ...toolEvent(EventKind.ToolResult, resultPayload),
+    ...toolEvent(EventKind.ToolResult, resultPayload, {
+      shape: ToolShape.ToolResult,
+      tool_use_id: "e1",
+      quiet: true,
+      patched: true,
+    }),
     content: "The file src/a.ts has been updated successfully.",
+    diffs: resultDiffs,
   });
   expect(frame).toContain("± src/a.ts  +1 -1");
   expect(frame).toContain("oldValue");
@@ -64,10 +91,13 @@ test("a file-edit tool result renders its header and diff, not the confirmation"
 
 test("a read result is hidden unless it failed", async () => {
   const read = { type: "tool_result", tool_use_result: { type: "text", file: { filePath: "a.ts" } } };
-  const ok = await frameOf({ ...toolEvent(EventKind.ToolResult, read), content: "1 mod processes;" });
+  const ok = await frameOf({
+    ...toolEvent(EventKind.ToolResult, read, { shape: ToolShape.ToolResult, quiet: true }),
+    content: "1 mod processes;",
+  });
   expect(ok).not.toContain("mod processes");
   const failed = await frameOf({
-    ...toolEvent(EventKind.ToolResult, { ...read, is_error: true }),
+    ...toolEvent(EventKind.ToolResult, { ...read, is_error: true }, { shape: ToolShape.ToolResult }),
     content: "File does not exist.",
   });
   expect(failed).toContain("File does not exist.");
@@ -107,11 +137,11 @@ test("a tool result with the same payload does not repeat the diff", async () =>
 
 test("a non-edit tool call renders only its preview line", async () => {
   const frame = await frameOf(
-    toolEvent(EventKind.ToolCall, {
-      type: "tool_use",
-      name: "Bash",
-      input: { command: "ls" },
-    }),
+    toolEvent(
+      EventKind.ToolCall,
+      { type: "tool_use", name: "Bash", input: { command: "ls" } },
+      { kind: ToolKind.Shell, name: "Bash", argument: "ls", shape: ToolShape.ToolUse },
+    ),
   );
   expect(frame).toContain("$ ls");
   expect(frame).not.toContain("+0 -0");
@@ -153,13 +183,20 @@ test("notes, errors and requests render as one-line rows", async () => {
 });
 
 test("tool glyphs use tone colors for each tool kind", async () => {
-  for (const name of ["Grep", "WebFetch", "Task", "TodoWrite", "Mystery"]) {
+  const kinds: Array<[string, ToolKind]> = [
+    ["Grep", ToolKind.Search],
+    ["WebFetch", ToolKind.Fetch],
+    ["Task", ToolKind.Agent],
+    ["TodoWrite", ToolKind.Todo],
+    ["Mystery", ToolKind.Other],
+  ];
+  for (const [name, kind] of kinds) {
     const frame = await frameOf(
-      toolEvent(EventKind.ToolCall, {
-        type: "tool_use",
-        name,
-        input: { pattern: "x" },
-      }),
+      toolEvent(
+        EventKind.ToolCall,
+        { type: "tool_use", name, input: { pattern: "x" } },
+        { kind, name, argument: "x", shape: ToolShape.ToolUse },
+      ),
     );
     expect(frame.trim().length).toBeGreaterThan(0);
   }
@@ -188,7 +225,11 @@ test("a single hidden line says line, not lines", async () => {
 test("a shell call shows its glyph, name and the head of a long command", async () => {
   const command = Array.from({ length: 6 }, (_, i) => `step ${i + 1}`).join("\n");
   const frame = await frameOf({
-    ...toolEvent(EventKind.ToolCall, { type: "tool_use", name: "Bash", input: { command } }),
+    ...toolEvent(
+      EventKind.ToolCall,
+      { type: "tool_use", name: "Bash", input: { command } },
+      { kind: ToolKind.Shell, name: "Bash", argument: command, shape: ToolShape.ToolUse },
+    ),
     content: "Bash",
   });
   expect(frame).toContain("$ step 1");

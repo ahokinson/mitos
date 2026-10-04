@@ -4,8 +4,9 @@ use anyhow::Result;
 use libsql::{Row, Value, params};
 
 use super::Store;
+use super::queries::text;
 use super::threads::thread_from_row;
-use crate::domain::{EventKind, ThreadSummary, ThreadUsage};
+use crate::domain::{EventKind, HarnessKind, ThreadId, ThreadSummary, ThreadUsage, Timestamp, now};
 
 /// The events a thread records about itself before anything is said.
 const SETUP_EVENTS: [EventKind; 4] = [
@@ -45,7 +46,7 @@ impl Cumulative {
 }
 
 struct Reading {
-    observed_at: String,
+    observed_at: Timestamp,
     model: Option<String>,
     turns: Option<u32>,
     context_used_tokens: Option<u64>,
@@ -68,7 +69,7 @@ fn count(row: &Row, index: i32) -> Result<Option<u64>> {
 
 fn reading_from_row(row: &Row) -> Result<Reading> {
     Ok(Reading {
-        observed_at: row.get(0)?,
+        observed_at: text(row, 0)?,
         model: row.get(1)?,
         turns: row
             .get::<Option<i64>>(2)?
@@ -150,11 +151,11 @@ impl Store {
 
     /// True only when the thread exists and has recorded nothing beyond its
     /// own setup events.
-    pub fn is_thread_empty(&self, thread_id: &str) -> Result<bool> {
+    pub fn is_thread_empty(&self, thread_id: &ThreadId) -> Result<bool> {
         let exists = self
             .query_optional(
                 "SELECT 1 FROM threads WHERE id = ?1",
-                params![thread_id],
+                params![thread_id.as_str()],
                 |row| Ok(row.get::<i64>(0)?),
             )?
             .is_some();
@@ -169,7 +170,7 @@ impl Store {
                     "SELECT 1 FROM thread_events WHERE thread_id = ?1 \
                      AND kind NOT IN ({setup}) LIMIT 1"
                 ),
-                params![thread_id],
+                params![thread_id.as_str()],
                 |row| Ok(row.get::<i64>(0)?),
             )?
             .is_some();
@@ -180,19 +181,23 @@ impl Store {
     /// snapshot), the thread's cumulative tokens and cost, plus account-wide
     /// rate windows for the harness. A harness with only hook data still has
     /// usage.
-    pub fn latest_usage(&self, thread_id: &str, harness: &str) -> Result<Option<ThreadUsage>> {
+    pub fn latest_usage(
+        &self,
+        thread_id: &ThreadId,
+        harness: HarnessKind,
+    ) -> Result<Option<ThreadUsage>> {
         let snapshot = self.query_optional(
             "SELECT observed_at, model, turns, context_used_tokens, context_limit_tokens \
              FROM usage_snapshots WHERE thread_id = ?1 AND harness = ?2 \
              ORDER BY observed_at DESC, rowid DESC LIMIT 1",
-            params![thread_id, harness],
+            params![thread_id.as_str(), harness.as_str()],
             reading_from_row,
         )?;
         let observation = self.query_optional(
             "SELECT observed_at, model, NULL, context_used_tokens, context_limit_tokens \
              FROM hook_observations WHERE thread_id = ?1 AND harness = ?2 \
              ORDER BY observed_at DESC LIMIT 1",
-            params![thread_id, harness],
+            params![thread_id.as_str(), harness.as_str()],
             reading_from_row,
         )?;
         if snapshot.is_none() && observation.is_none() {
@@ -203,7 +208,7 @@ impl Store {
                 "SELECT plan_five_hour_percent, plan_five_hour_resets_at, \
                         plan_week_percent, plan_week_resets_at \
                  FROM harness_plan_usage WHERE harness = ?1",
-                params![harness],
+                params![harness.as_str()],
                 limits_from_row,
             )?
             .unwrap_or_default();
@@ -224,10 +229,10 @@ impl Store {
             .flatten()
             .map(|reading| reading.observed_at.clone())
             .max()
-            .unwrap_or_default();
+            .unwrap_or_else(now);
 
         Ok(Some(ThreadUsage {
-            harness: harness.to_string(),
+            harness,
             observed_at,
             input_tokens: self.thread_tokens(thread_id, Cumulative::InputTokens)?,
             output_tokens: self.thread_tokens(thread_id, Cumulative::OutputTokens)?,
@@ -252,7 +257,7 @@ impl Store {
     }
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    fn thread_tokens(&self, thread_id: &str, figure: Cumulative) -> Result<Option<u64>> {
+    fn thread_tokens(&self, thread_id: &ThreadId, figure: Cumulative) -> Result<Option<u64>> {
         Ok(self
             .thread_total(thread_id, figure)?
             .map(|total| total.max(0.0) as u64))
@@ -263,7 +268,7 @@ impl Store {
     /// (one running total per native session), else the handoff snapshot (a
     /// session total). A turn may report a running figure many times, so only
     /// its last report counts. `None` when nothing reported it.
-    fn thread_total(&self, thread_id: &str, figure: Cumulative) -> Result<Option<f64>> {
+    fn thread_total(&self, thread_id: &ThreadId, figure: Cumulative) -> Result<Option<f64>> {
         let column = figure.column();
         let observed = figure.observed_column();
         Ok(self
@@ -300,7 +305,7 @@ impl Store {
                                + COALESCE((SELECT SUM(value) FROM collected), 0) \
                             END AS total"
                 ),
-                params![thread_id],
+                params![thread_id.as_str()],
                 total_from_row,
             )?
             .flatten())
@@ -313,6 +318,7 @@ mod tests {
 
     use libsql::params;
 
+    use crate::domain::HarnessKind;
     use crate::store::Store;
     use crate::store::fixtures::test_store;
 
@@ -439,7 +445,7 @@ mod tests {
 
     fn usage_cost(store: &Store, thread_id: &str, harness: &str) -> Option<f64> {
         store
-            .latest_usage(thread_id, harness)
+            .latest_usage(&thread_id.into(), harness.parse().unwrap())
             .unwrap()
             .and_then(|usage| usage.cost_usd)
     }
@@ -465,8 +471,8 @@ mod tests {
 
         let listed = store.thread_summaries("workspace-a").unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].thread.id, "a");
-        assert_eq!(listed[0].thread.workspace_id, "ws-a");
+        assert_eq!(listed[0].thread.id, "a".into());
+        assert_eq!(listed[0].thread.workspace_id, "ws-a".into());
         assert_eq!(
             listed[0].opening_message.as_deref(),
             Some("continue auth work")
@@ -560,9 +566,9 @@ mod tests {
             event(&store, id, 2, "harness_bound", None);
         }
         event(&store, "used", 3, "user_message", None);
-        assert!(store.is_thread_empty("fresh").unwrap());
-        assert!(!store.is_thread_empty("used").unwrap());
-        assert!(!store.is_thread_empty("missing").unwrap());
+        assert!(store.is_thread_empty(&"fresh".into()).unwrap());
+        assert!(!store.is_thread_empty(&"used".into()).unwrap());
+        assert!(!store.is_thread_empty(&"missing".into()).unwrap());
         finish(root);
     }
 
@@ -584,7 +590,10 @@ mod tests {
                 params![START],
             )
             .unwrap();
-        let usage = store.latest_usage("session", "codex").unwrap().unwrap();
+        let usage = store
+            .latest_usage(&"session".into(), HarnessKind::Codex)
+            .unwrap()
+            .unwrap();
         assert_eq!(usage.context_used_tokens, Some(64_000));
         assert_eq!(usage.context_limit_tokens, Some(128_000));
         assert_eq!(usage.input_tokens, Some(100));
@@ -593,7 +602,12 @@ mod tests {
         assert_eq!(usage.plan_five_hour_percent, Some(42.5));
         assert_eq!(usage.plan_week_percent, None);
         close(usage.cost_usd, 0.0421);
-        assert!(store.latest_usage("session", "claude").unwrap().is_none());
+        assert!(
+            store
+                .latest_usage(&"session".into(), HarnessKind::Claude)
+                .unwrap()
+                .is_none()
+        );
         finish(root);
     }
 
@@ -718,7 +732,10 @@ mod tests {
             Some("turn-2"),
             [Some(200), Some(30), Some(50)],
         );
-        let usage = store.latest_usage("t", "codex").unwrap().unwrap();
+        let usage = store
+            .latest_usage(&"t".into(), HarnessKind::Codex)
+            .unwrap()
+            .unwrap();
         assert_eq!(usage.input_tokens, Some(300));
         assert_eq!(usage.output_tokens, Some(50));
         assert_eq!(usage.cached_input_tokens, Some(55));
@@ -755,7 +772,10 @@ mod tests {
             Some("turn-1"),
             [None; 3],
         );
-        let usage = store.latest_usage("t", "hermes").unwrap().unwrap();
+        let usage = store
+            .latest_usage(&"t".into(), HarnessKind::Hermes)
+            .unwrap()
+            .unwrap();
         assert_eq!(usage.input_tokens, Some(40));
         assert_eq!(usage.output_tokens, Some(8));
         finish(root);
@@ -791,7 +811,10 @@ mod tests {
             None,
             [Some(7), Some(3), None],
         );
-        let usage = store.latest_usage("t", "opencode").unwrap().unwrap();
+        let usage = store
+            .latest_usage(&"t".into(), HarnessKind::OpenCode)
+            .unwrap()
+            .unwrap();
         assert_eq!(usage.input_tokens, Some(107));
         assert_eq!(usage.output_tokens, Some(13));
         finish(root);
@@ -804,7 +827,10 @@ mod tests {
         thread(&store, "t", "ws", START);
         let mut serial = 0;
         tokens(&store, &mut serial, "t", "codex", Some("turn-1"), [None; 3]);
-        let usage = store.latest_usage("t", "codex").unwrap().unwrap();
+        let usage = store
+            .latest_usage(&"t".into(), HarnessKind::Codex)
+            .unwrap()
+            .unwrap();
         assert_eq!(usage.input_tokens, None);
         assert_eq!(usage.cached_input_tokens, None);
         assert_eq!(usage.cost_usd, None);
@@ -907,7 +933,10 @@ mod tests {
                 ..Observed::default()
             },
         );
-        let usage = store.latest_usage("t", "claude").unwrap().unwrap();
+        let usage = store
+            .latest_usage(&"t".into(), HarnessKind::Claude)
+            .unwrap()
+            .unwrap();
         close(usage.cost_usd, 0.75);
         assert_eq!(usage.context_used_tokens, Some(16_000));
         assert_eq!(usage.context_limit_tokens, Some(200_000));
@@ -941,9 +970,12 @@ mod tests {
                 ..Observed::default()
             },
         );
-        let usage = store.latest_usage("t", "claude").unwrap().unwrap();
+        let usage = store
+            .latest_usage(&"t".into(), HarnessKind::Claude)
+            .unwrap()
+            .unwrap();
         assert_eq!(usage.context_used_tokens, Some(9000));
-        assert_eq!(usage.observed_at, "2026-01-01T00:10:00Z");
+        assert_eq!(usage.observed_at, "2026-01-01T00:10:00Z".into());
 
         store
             .execute(
@@ -963,9 +995,12 @@ mod tests {
                 ..Observed::default()
             },
         );
-        let usage = store.latest_usage("t", "claude").unwrap().unwrap();
+        let usage = store
+            .latest_usage(&"t".into(), HarnessKind::Claude)
+            .unwrap()
+            .unwrap();
         assert_eq!(usage.context_used_tokens, Some(1000));
-        assert_eq!(usage.observed_at, "2026-01-01T00:05:00Z");
+        assert_eq!(usage.observed_at, "2026-01-01T00:05:00Z".into());
         finish(root);
     }
 
@@ -986,7 +1021,12 @@ mod tests {
                 ..Observed::default()
             },
         );
-        assert!(store.latest_usage("b", "claude").unwrap().is_none());
+        assert!(
+            store
+                .latest_usage(&"b".into(), HarnessKind::Claude)
+                .unwrap()
+                .is_none()
+        );
 
         let mut serial = 0;
         cost(

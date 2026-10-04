@@ -3,11 +3,13 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::Value;
 
+use crate::domain::ThreadId;
+
 const SOCKET_ID_LEN: usize = 12;
 
 /// Unix socket paths are length-limited, so the name uses a thread-id prefix.
-pub fn socket_path(state_root: &Path, thread_id: &str) -> PathBuf {
-    let short: String = thread_id.chars().take(SOCKET_ID_LEN).collect();
+pub fn socket_path(state_root: &Path, thread_id: &ThreadId) -> PathBuf {
+    let short: String = thread_id.as_str().chars().take(SOCKET_ID_LEN).collect();
     state_root.join("sockets").join(format!("{short}.sock"))
 }
 
@@ -155,14 +157,14 @@ mod tests {
 
     #[test]
     fn socket_path_truncates_the_thread_id() {
-        let path = socket_path(Path::new("/state"), "0123456789abcdef");
+        let path = socket_path(Path::new("/state"), &"0123456789abcdef".into());
         assert_eq!(path, Path::new("/state/sockets/0123456789ab.sock"));
     }
 
     #[test]
     fn answers_reach_the_child_stdin_and_the_socket_is_removed_on_drop() {
         let dir = std::env::temp_dir().join(format!("mitos-answers-{}", crate::domain::id()));
-        let path = socket_path(&dir, "thread-xyz-123");
+        let path = socket_path(&dir, &"thread-xyz-123".into());
         let mut child = Command::new("cat")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

@@ -1,12 +1,13 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
 use super::args::{EnterArgs, ThreadCommand};
 use super::outputs::emit;
-use crate::adapters::Adapters;
+use crate::domain::{HarnessKind, Reply, ThreadId};
+use crate::harnesses::Adapters;
 use crate::ports::HarnessRunner;
 use crate::runner::ptys::PtyRunner;
-use crate::service::ThreadService;
+use crate::service::{EventView, ThreadService};
 
 pub fn dispatch(
     service: &ThreadService<'_>,
@@ -31,7 +32,9 @@ pub fn dispatch(
                     println!(
                         "{} [{}] {}",
                         thread.id,
-                        thread.active_harness.as_deref().unwrap_or("unassigned"),
+                        thread
+                            .active_harness
+                            .map_or("unassigned", HarnessKind::as_str),
                         thread.status.as_str(),
                     );
                 }
@@ -42,21 +45,9 @@ pub fn dispatch(
             println!("Queued turn {turn_id} on thread {id}.");
             Ok(())
         }
-        ThreadCommand::Sync { id, since, json } => {
-            let events = service.sync(&id, since)?;
-            emit(json, events, |events| {
-                for event in events {
-                    println!(
-                        "[{}] {}: {}",
-                        event.seq,
-                        event.kind.as_str(),
-                        event.content.unwrap_or_default()
-                    );
-                }
-            })
-        }
+        ThreadCommand::Sync { id, since, json } => sync(service, &id, since, json),
         ThreadCommand::Reassign { id, to } => {
-            service.reassign_harness(&id, &to, adapter)?;
+            service.reassign_harness(&id, to, adapter)?;
             println!("Reassigned thread {id} to {to}.");
             Ok(())
         }
@@ -86,10 +77,20 @@ pub fn dispatch(
         ThreadCommand::Answer {
             id,
             request,
+            approve,
+            deny,
+            text,
             response,
         } => {
-            let response = serde_json::from_str(&response).unwrap_or(Value::String(response));
-            service.answer(&id, &request, &response)?;
+            match response {
+                Some(raw) => {
+                    let response = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
+                    service.answer(&id, &request, &response)?;
+                }
+                None => {
+                    service.reply(&id, &request, &reply_from(approve, deny, text)?)?;
+                }
+            }
             println!("Answered request {request}.");
             Ok(())
         }
@@ -104,9 +105,32 @@ pub fn dispatch(
     }
 }
 
+fn sync(service: &ThreadService<'_>, id: &ThreadId, since: i64, json: bool) -> Result<()> {
+    let events = service.event_views(id, since)?;
+    emit(json, events, |events| {
+        for EventView { event, .. } in events {
+            println!(
+                "[{}] {}: {}",
+                event.seq,
+                event.kind.as_str(),
+                event.content.unwrap_or_default()
+            );
+        }
+    })
+}
+
+fn reply_from(approve: bool, deny: bool, text: Option<String>) -> Result<Reply> {
+    match (approve, deny, text) {
+        (true, _, _) => Ok(Reply::Approve),
+        (_, true, note) => Ok(Reply::Deny(note)),
+        (_, _, Some(text)) => Ok(Reply::Text(text)),
+        _ => bail!("provide --approve, --deny, --text, or --response"),
+    }
+}
+
 pub fn enter(service: &ThreadService<'_>, adapter: &Adapters, args: EnterArgs) -> Result<()> {
     let harness = args.harness;
-    let entry = service.begin_entry(&args.thread, &harness, args.native_session, adapter)?;
+    let entry = service.begin_entry(&args.thread, harness, args.native_session, adapter)?;
     println!(
         "\n--- Mitos handoff to {harness} ---\n{}\n--- entering native harness; exit it normally to continue ---\n",
         entry.context

@@ -164,9 +164,10 @@ test("consecutive tool rows group and a folded edit hides its read", async () =>
     role: null,
     created_at: "2026-01-01T00:00:00Z",
   }
+  const tool = (overrides: object) => ({ kind: "other", name: null, argument: "", tool_use_id: null, path: null, shape: "other", quiet: false, patched: false, ...overrides })
   const events = [
-    { ...base, seq: 1, kind: "tool_call", content: "Read", payload: { type: "tool_use", id: "r1", name: "Read", input: { file_path: "a.ts" } } },
-    { ...base, seq: 2, kind: "tool_call", content: "Edit", payload: { type: "tool_use", id: "e1", name: "Edit", input: { file_path: "a.ts", old_string: "oldValue", new_string: "newValue" } } },
+    { ...base, seq: 1, kind: "tool_call", content: "Read", payload: { type: "tool_use", id: "r1", name: "Read", input: { file_path: "a.ts" } }, tool: tool({ kind: "read", name: "Read", argument: "a.ts", tool_use_id: "r1", path: "a.ts", shape: "tool_use" }) },
+    { ...base, seq: 2, kind: "tool_call", content: "Edit", payload: { type: "tool_use", id: "e1", name: "Edit", input: { file_path: "a.ts", old_string: "oldValue", new_string: "newValue" } }, tool: tool({ kind: "edit", name: "Edit", argument: "a.ts", tool_use_id: "e1", path: "a.ts", shape: "tool_use" }) },
     {
       ...base,
       seq: 3,
@@ -177,9 +178,11 @@ test("consecutive tool rows group and a folded edit hides its read", async () =>
         tool_use_id: "e1",
         tool_use_result: { filePath: "a.ts", structuredPatch: [{ oldStart: 1, newStart: 1, lines: ["-oldValue", "+newValue"] }] },
       },
+      diffs: [{ path: "a.ts", diff: "--- a/a.ts\n+++ b/a.ts\n@@ -1,1 +1,1 @@\n-oldValue\n+newValue\n", added: 1, removed: 1, truncated: 0 }],
+      tool: tool({ shape: "tool_result", tool_use_id: "e1", quiet: true, patched: true }),
     },
-    { ...base, seq: 4, kind: "tool_call", content: "Bash", payload: { type: "tool_use", id: "b1", name: "Bash", input: { command: "ls" } } },
-    { ...base, seq: 5, kind: "tool_result", content: "listing", payload: { type: "tool_result", tool_use_id: "b1" } },
+    { ...base, seq: 4, kind: "tool_call", content: "Bash", payload: { type: "tool_use", id: "b1", name: "Bash", input: { command: "ls" } }, tool: tool({ kind: "shell", name: "Bash", argument: "ls", tool_use_id: "b1", shape: "tool_use" }) },
+    { ...base, seq: 5, kind: "tool_result", content: "listing", payload: { type: "tool_result", tool_use_id: "b1" }, tool: tool({ shape: "tool_result", tool_use_id: "b1" }) },
   ]
   await writeFile(join(dir, "events.json"), JSON.stringify(events))
   const { setup, settle } = await mount()

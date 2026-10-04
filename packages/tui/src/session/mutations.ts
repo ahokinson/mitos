@@ -1,5 +1,6 @@
 import { run, runJson } from "@core/invocations.ts";
 import type { HookInitOutcome, HookStatus } from "@session/hooks.ts";
+import { Decision, type Reply } from "@session/requests.ts";
 import type { CompactMode, Thread, ThreadMode } from "@session/threads.ts";
 
 /** Changes to Mitos state. Reads go through `@database/views.ts`. */
@@ -107,7 +108,7 @@ export async function setMode(
 export async function answerRequest(
   threadId: string,
   requestId: string,
-  response: unknown,
+  reply: Reply,
 ): Promise<void> {
   const { exitCode, stdout, stderr } = await run([
     "thread",
@@ -115,8 +116,9 @@ export async function answerRequest(
     threadId,
     "--request",
     requestId,
-    "--response",
-    JSON.stringify(response),
+    ...(reply.decision === Decision.Approve ? ["--approve"] : []),
+    ...(reply.decision === Decision.Deny ? ["--deny"] : []),
+    ...(reply.text?.trim() ? ["--text", reply.text] : []),
   ]);
   if (exitCode !== 0)
     throw new Error(

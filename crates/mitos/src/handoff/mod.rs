@@ -5,7 +5,7 @@ mod renderers;
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::domain::ThreadEvent;
+use crate::domain::{ThreadEvent, ThreadId};
 
 pub use bounds::bounded_context;
 pub use extracts::{contents_of, files_touched};
@@ -13,7 +13,7 @@ pub use renderers::{DeterministicRenderer, PREAMBLE_PREFIX};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct HandoffFacts {
-    pub thread_id: String,
+    pub thread_id: ThreadId,
     pub events: Vec<ThreadEvent>,
     pub files_touched: Vec<String>,
 }

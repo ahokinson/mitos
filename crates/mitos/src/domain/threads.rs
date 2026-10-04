@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::{HarnessKind, ThreadId, Timestamp, WorkspaceId};
+
 string_enum! {
     enum ThreadStatus("thread status") {
         Active => "active",
@@ -36,14 +38,14 @@ pub struct ThreadSummary {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Thread {
-    pub id: String,
-    pub workspace_id: String,
+    pub id: ThreadId,
+    pub workspace_id: WorkspaceId,
     pub status: ThreadStatus,
     pub mode: ThreadMode,
-    pub active_harness: Option<String>,
+    pub active_harness: Option<HarnessKind>,
     /// Opaque, adapter-owned.
     pub native_session: Option<Value>,
     pub last_event_seq: i64,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
 }

@@ -13,22 +13,13 @@ use serde_json::{Value, json};
 
 use super::clients::{SERVER_USER, ServerAccess, ServerClient};
 use super::streams::{PendingAsk, SessionStream, agent_for, pending_for, reply_for};
-use crate::adapters::Emitter;
-use crate::domain::ThreadMode;
+use crate::harnesses::{Emitter, Turn};
 use crate::ipc::answers::AnswerListener;
 use crate::wire::events::{AdapterEvent, kinds};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const LISTENING: &str = "listening on ";
 const STREAM_ENDED: &str = "opencode event stream ended before the turn completed";
-
-pub struct Turn<'a> {
-    pub workdir: &'a Path,
-    pub text: &'a str,
-    pub session: Option<&'a str>,
-    pub mode: ThreadMode,
-    pub ephemeral: bool,
-}
 
 pub type SharedPending = Arc<Mutex<HashMap<String, PendingAsk>>>;
 
@@ -245,6 +236,7 @@ mod tests {
     use std::net::{Shutdown, TcpListener, TcpStream};
 
     use super::*;
+    use crate::domain::ThreadMode;
     use crate::harnesses::fixtures::{FakeProgram, kinds_of};
     use crate::harnesses::opencode::clients::base64;
 

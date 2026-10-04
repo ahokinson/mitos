@@ -57,28 +57,7 @@ export function requestHint(kind: RequestKind): string {
   }
 }
 
-/** The response shape each adapter expects, or `null` when the kind needs
- * free text instead (a question can only be answered, not approved). */
-export function responseFor(
-  kind: RequestKind,
-  decision: Decision,
-  text?: string,
-): unknown | null {
-  const note = text?.trim() || undefined;
-  switch (kind) {
-    case RequestKind.Permission:
-      return decision === Decision.Approve
-        ? { allow: true }
-        : { allow: false, message: note };
-    case RequestKind.PlanApproval:
-      return decision === Decision.Approve
-        ? { approved: true }
-        : { approved: false, feedback: note };
-    case RequestKind.Question:
-      return null;
-  }
-}
-
-export function questionResponse(text: string): unknown {
-  return { answer: text.trim() };
-}
+/** What the user chose. The core turns it into the response each adapter
+ * expects: a decision for a permission or plan, text for a question or a
+ * denial's reason. */
+export type Reply = { decision?: Decision; text?: string };

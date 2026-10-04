@@ -2,14 +2,14 @@ use anyhow::{Result, bail};
 use serde_json::Value;
 
 use super::ThreadService;
-use crate::domain::{EventKind, NewThreadEvent, ThreadMode, UnbindReason};
+use crate::domain::{EventKind, HarnessKind, NewThreadEvent, ThreadId, ThreadMode, UnbindReason};
 use crate::wire::responses::Capabilities;
 
 impl ThreadService<'_> {
     pub(super) fn bind_harness(
         &self,
-        thread_id: &str,
-        harness: &str,
+        thread_id: &ThreadId,
+        harness: HarnessKind,
         native_session: Option<&Value>,
     ) -> Result<()> {
         self.store
@@ -21,15 +21,15 @@ impl ThreadService<'_> {
 
     pub(super) fn unbind_harness(
         &self,
-        thread_id: &str,
-        harness: &str,
+        thread_id: &ThreadId,
+        harness: HarnessKind,
         reason: UnbindReason,
     ) -> Result<()> {
         self.store.close_open_binding(thread_id, harness, reason)?;
         self.store.append_event(
             thread_id,
             NewThreadEvent {
-                harness: Some(harness.into()),
+                harness: Some(harness),
                 ..NewThreadEvent::new(EventKind::HarnessUnbound)
             },
         )?;
@@ -38,7 +38,7 @@ impl ThreadService<'_> {
 }
 
 pub(super) fn ensure_supported(
-    harness: &str,
+    harness: HarnessKind,
     capabilities: &Capabilities,
     mode: ThreadMode,
 ) -> Result<()> {

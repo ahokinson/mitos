@@ -1,9 +1,10 @@
 use std::path::Path;
 
+use crate::domain::HarnessKind;
 use crate::hooks::files::{blocked_reason, read_text, write_atomic};
 use crate::hooks::reports::{HookStatus, InitOutcome, InitResult, Trust};
 
-const HARNESS: &str = "opencode";
+const HARNESS: HarnessKind = HarnessKind::OpenCode;
 const MARKER: &str = "mitos hook opencode";
 
 /// The harness has no command hooks, so Mitos installs a plugin that forwards
@@ -46,7 +47,7 @@ export const MitosHooks = async ({ $ }) => ({
 
 pub fn status(plugin: &Path) -> HookStatus {
     HookStatus {
-        harness: HARNESS.into(),
+        harness: HARNESS,
         target: plugin.display().to_string(),
         installed: read_text(plugin).is_some_and(|text| text.contains(MARKER)),
         trust: Trust::NotApplicable,

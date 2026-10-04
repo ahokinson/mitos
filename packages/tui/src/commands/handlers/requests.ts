@@ -4,9 +4,8 @@ import { FeedbackTone } from "@commands/feedbackLines.ts";
 import {
   Decision,
   type HarnessRequest,
-  questionResponse,
+  type Reply,
   RequestKind,
-  responseFor,
 } from "@session/requests.ts";
 import type { Thread } from "@session/threads.ts";
 
@@ -32,14 +31,14 @@ function oldestPending(ctx: CommandContext): PendingTarget | null {
 
 async function submitAnswer(
   target: PendingTarget,
-  response: unknown,
+  reply: Reply,
   ctx: CommandContext,
 ): Promise<void> {
   try {
     await ctx.mutations.answerRequest(
       target.thread.id,
       target.request.id,
-      response,
+      reply,
     );
     ctx.refresh();
   } catch (cause) {
@@ -54,8 +53,7 @@ async function decide(
 ): Promise<void> {
   const target = oldestPending(ctx);
   if (!target) return;
-  const response = responseFor(target.request.kind, decision, text);
-  if (response === null) {
+  if (target.request.kind === RequestKind.Question) {
     ctx.note(
       target.thread.id,
       FeedbackTone.Error,
@@ -63,7 +61,7 @@ async function decide(
     );
     return;
   }
-  await submitAnswer(target, response, ctx);
+  await submitAnswer(target, { decision, ...(text ? { text } : {}) }, ctx);
 }
 
 export const requestCommands: Record<string, CommandEntry> = {
@@ -97,7 +95,7 @@ export const requestCommands: Record<string, CommandEntry> = {
         ctx.note(target.thread.id, FeedbackTone.Error, "Usage: /answer <text>");
         return;
       }
-      await submitAnswer(target, questionResponse(argLine), ctx);
+      await submitAnswer(target, { text: argLine }, ctx);
     },
   },
 };

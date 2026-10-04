@@ -9,6 +9,7 @@ import {
   HookTrust,
 } from "@session/hooks.ts";
 import {
+  Decision,
   type HarnessRequest,
   RequestKind,
   RequestStatus,
@@ -149,10 +150,10 @@ function createFakeContext(options: {
         calls.push({ name: "setMode", args: [threadId, mode] });
         if (options.failWith?.setMode) throw options.failWith.setMode;
       },
-      answerRequest: async (threadId, requestId, response) => {
+      answerRequest: async (threadId, requestId, reply) => {
         calls.push({
           name: "answerRequest",
-          args: [threadId, requestId, response],
+          args: [threadId, requestId, reply],
         });
         if (options.failWith?.answerRequest)
           throw options.failWith.answerRequest;
@@ -455,7 +456,7 @@ test("/mode rejects an unknown mode", async () => {
   expect(notes[0]?.tone).toBe(FeedbackTone.Error);
 });
 
-test("/approve answers the oldest permission request with allow", async () => {
+test("/approve approves the oldest pending request", async () => {
   const { ctx, calls } = createFakeContext({
     selected: CLAUDE_THREAD,
     requests: [
@@ -467,12 +468,12 @@ test("/approve answers the oldest permission request with allow", async () => {
   expect(calls).toEqual([
     {
       name: "answerRequest",
-      args: [CLAUDE_THREAD.id, "req-1", { allow: true }],
+      args: [CLAUDE_THREAD.id, "req-1", { decision: Decision.Approve }],
     },
   ]);
 });
 
-test("/deny on a plan approval carries the feedback", async () => {
+test("/deny carries the feedback as the reason", async () => {
   const { ctx, calls } = createFakeContext({
     selected: CLAUDE_THREAD,
     requests: [request(RequestKind.PlanApproval)],
@@ -484,7 +485,7 @@ test("/deny on a plan approval carries the feedback", async () => {
       args: [
         CLAUDE_THREAD.id,
         "req-1",
-        { approved: false, feedback: "split it into two steps" },
+        { decision: Decision.Deny, text: "split it into two steps" },
       ],
     },
   ]);
@@ -509,7 +510,7 @@ test("/answer sends the text for a pending question", async () => {
   expect(calls).toEqual([
     {
       name: "answerRequest",
-      args: [CLAUDE_THREAD.id, "req-1", { answer: "blue" }],
+      args: [CLAUDE_THREAD.id, "req-1", { text: "blue" }],
     },
   ]);
 });

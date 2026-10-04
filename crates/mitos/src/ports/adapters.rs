@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 use serde_json::Value;
 
+use crate::domain::HarnessKind;
 use crate::wire::events::AdapterEvent;
 use crate::wire::requests::{
     AdapterRequest, AttachThreadRequest, DetachThreadRequest, HandoffRequest, SendMessageRequest,
@@ -13,7 +14,7 @@ use crate::wire::responses::{Capabilities, CollectedHandoff, LaunchPlan};
 pub type EventSink<'a> = dyn FnMut(AdapterEvent) -> Result<()> + 'a;
 
 pub trait HarnessAdapter {
-    fn negotiate(&self, harness: &str) -> Result<Capabilities>;
+    fn negotiate(&self, harness: HarnessKind) -> Result<Capabilities>;
 
     fn prepare_launch(&self, request: &AdapterRequest) -> Result<LaunchPlan>;
     fn collect_handoff(&self, request: &HandoffRequest) -> Result<CollectedHandoff>;

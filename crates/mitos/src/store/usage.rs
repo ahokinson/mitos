@@ -2,9 +2,7 @@ use anyhow::Result;
 use libsql::params;
 
 use super::Store;
-#[cfg(test)]
-use crate::domain::HarnessPlanUsage;
-use crate::domain::{UsageSnapshot, id, now};
+use crate::domain::{HarnessKind, ThreadId, TurnId, UsageSnapshot, id, now};
 
 #[derive(Clone, Debug, Default)]
 pub struct UsageFields {
@@ -34,16 +32,16 @@ fn sql_count(value: Option<u64>) -> Option<i64> {
 impl Store {
     pub fn record_usage_snapshot(
         &self,
-        thread_id: &str,
-        harness: &str,
-        turn_id: Option<&str>,
+        thread_id: &ThreadId,
+        harness: HarnessKind,
+        turn_id: Option<&TurnId>,
         fields: UsageFields,
     ) -> Result<UsageSnapshot> {
         let snapshot = UsageSnapshot {
             id: id(),
-            thread_id: thread_id.to_string(),
-            harness: harness.to_string(),
-            turn_id: turn_id.map(str::to_string),
+            thread_id: thread_id.clone(),
+            harness,
+            turn_id: turn_id.cloned(),
             observed_at: now(),
             input_tokens: fields.input_tokens,
             output_tokens: fields.output_tokens,
@@ -60,10 +58,10 @@ impl Store {
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
             params![
                 snapshot.id.clone(),
-                snapshot.thread_id.clone(),
-                snapshot.harness.clone(),
-                snapshot.turn_id.clone(),
-                snapshot.observed_at.clone(),
+                snapshot.thread_id.as_str(),
+                snapshot.harness.as_str(),
+                snapshot.turn_id.as_ref().map(TurnId::as_str),
+                snapshot.observed_at.as_str(),
                 sql_count(snapshot.input_tokens),
                 sql_count(snapshot.output_tokens),
                 sql_count(snapshot.cached_input_tokens),
@@ -77,7 +75,7 @@ impl Store {
         Ok(snapshot)
     }
 
-    pub fn upsert_plan_usage(&self, harness: &str, fields: PlanUsageFields) -> Result<()> {
+    pub fn upsert_plan_usage(&self, harness: HarnessKind, fields: PlanUsageFields) -> Result<()> {
         self.execute(
             "INSERT INTO harness_plan_usage \
              (harness, plan_five_hour_percent, plan_five_hour_resets_at, plan_week_percent, plan_week_resets_at, observed_at) \
@@ -89,38 +87,16 @@ impl Store {
                plan_week_resets_at = excluded.plan_week_resets_at, \
                observed_at = excluded.observed_at",
             params![
-                harness,
+                harness.as_str(),
                 fields.plan_five_hour_percent,
                 fields.plan_five_hour_resets_at,
                 fields.plan_week_percent,
                 fields.plan_week_resets_at,
-                now()
+                now().as_str()
             ],
         )?;
         Ok(())
     }
-
-    #[cfg(test)]
-    pub fn plan_usage(&self, harness: &str) -> Result<Option<HarnessPlanUsage>> {
-        self.query_optional(
-            "SELECT harness, plan_five_hour_percent, plan_five_hour_resets_at, plan_week_percent, plan_week_resets_at, observed_at \
-             FROM harness_plan_usage WHERE harness = ?1",
-            params![harness],
-            plan_usage_from_row,
-        )
-    }
-}
-
-#[cfg(test)]
-fn plan_usage_from_row(row: &libsql::Row) -> Result<HarnessPlanUsage> {
-    Ok(HarnessPlanUsage {
-        harness: row.get(0)?,
-        plan_five_hour_percent: row.get(1)?,
-        plan_five_hour_resets_at: row.get(2)?,
-        plan_week_percent: row.get(3)?,
-        plan_week_resets_at: row.get(4)?,
-        observed_at: row.get(5)?,
-    })
 }
 
 #[cfg(test)]
@@ -128,6 +104,7 @@ mod tests {
     use std::fs;
 
     use super::{PlanUsageFields, UsageFields};
+    use crate::domain::HarnessKind;
     use crate::store::fixtures::{test_store, test_thread};
     use libsql::params;
 
@@ -149,8 +126,8 @@ mod tests {
         let priced = store
             .record_usage_snapshot(
                 &thread.id,
-                "claude",
-                Some("turn-1"),
+                HarnessKind::Claude,
+                Some(&"turn-1".into()),
                 UsageFields {
                     cost_usd: Some(0.0421),
                     ..UsageFields::default()
@@ -158,7 +135,7 @@ mod tests {
             )
             .unwrap();
         let unpriced = store
-            .record_usage_snapshot(&thread.id, "codex", None, UsageFields::default())
+            .record_usage_snapshot(&thread.id, HarnessKind::Codex, None, UsageFields::default())
             .unwrap();
 
         assert_eq!(stored_cost(&store, &priced.id), Some(0.0421));
@@ -171,7 +148,7 @@ mod tests {
         let (store, root) = test_store();
         store
             .upsert_plan_usage(
-                "claude",
+                HarnessKind::Claude,
                 PlanUsageFields {
                     plan_five_hour_percent: Some(10.0),
                     ..PlanUsageFields::default()
@@ -180,7 +157,7 @@ mod tests {
             .unwrap();
         store
             .upsert_plan_usage(
-                "claude",
+                HarnessKind::Claude,
                 PlanUsageFields {
                     plan_five_hour_percent: Some(42.0),
                     ..PlanUsageFields::default()
@@ -188,7 +165,7 @@ mod tests {
             )
             .unwrap();
 
-        let usage = store.plan_usage("claude").unwrap().unwrap();
+        let usage = store.plan_usage(HarnessKind::Claude).unwrap().unwrap();
         assert_eq!(usage.plan_five_hour_percent, Some(42.0));
         fs::remove_dir_all(root).unwrap();
     }

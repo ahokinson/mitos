@@ -5,8 +5,14 @@ mod opencode;
 
 use super::locations::Locations;
 use super::reports::{HookStatus, InitOutcome, InitResult};
+use crate::domain::HarnessKind;
 
-pub const HARNESSES: [&str; 4] = ["claude", "codex", "hermes", "opencode"];
+fn harness_names() -> Vec<&'static str> {
+    HarnessKind::ALL
+        .into_iter()
+        .map(HarnessKind::as_str)
+        .collect()
+}
 
 pub fn status(locations: &Locations) -> Vec<HookStatus> {
     vec![
@@ -19,28 +25,27 @@ pub fn status(locations: &Locations) -> Vec<HookStatus> {
 
 /// `only` empty means every harness; an unknown name is reported, not ignored.
 pub fn init(locations: &Locations, only: &[String]) -> Vec<InitOutcome> {
-    let wanted = |harness: &str| only.is_empty() || only.iter().any(|name| name == harness);
-    let mut outcomes = Vec::new();
-    if wanted("claude") {
-        outcomes.push(claude::init(&locations.claude_settings));
-    }
-    if wanted("codex") {
-        outcomes.push(codex::init(&locations.codex_hooks));
-    }
-    if wanted("hermes") {
-        outcomes.push(hermes::init(&locations.hermes_config));
-    }
-    if wanted("opencode") {
-        outcomes.push(opencode::init(&locations.opencode_plugin));
-    }
+    let mut outcomes: Vec<InitOutcome> = HarnessKind::ALL
+        .into_iter()
+        .filter(|harness| only.is_empty() || only.iter().any(|name| name == harness.as_str()))
+        .map(|harness| match harness {
+            HarnessKind::Claude => claude::init(&locations.claude_settings),
+            HarnessKind::Codex => codex::init(&locations.codex_hooks),
+            HarnessKind::Hermes => hermes::init(&locations.hermes_config),
+            HarnessKind::OpenCode => opencode::init(&locations.opencode_plugin),
+        })
+        .collect();
     for name in only
         .iter()
-        .filter(|name| !HARNESSES.contains(&name.as_str()))
+        .filter(|name| name.parse::<HarnessKind>().is_err())
     {
         outcomes.push(InitOutcome::new(
             name,
             InitResult::Skipped,
-            format!("unknown harness; choose from {}", HARNESSES.join(", ")),
+            format!(
+                "unknown harness; choose from {}",
+                harness_names().join(", ")
+            ),
         ));
     }
     outcomes
@@ -50,7 +55,7 @@ pub fn init(locations: &Locations, only: &[String]) -> Vec<InitOutcome> {
 mod tests {
     use std::fs;
 
-    use super::{init, status};
+    use super::{HarnessKind, init, status};
     use crate::hooks::files::scratch_dir;
     use crate::hooks::locations::Locations;
     use crate::hooks::reports::InitResult;
@@ -73,7 +78,7 @@ mod tests {
             .map(|s| s.harness)
             .collect();
 
-        assert_eq!(names, ["claude", "codex", "hermes", "opencode"]);
+        assert_eq!(names, HarnessKind::ALL);
         fs::remove_dir_all(dir).unwrap();
     }
 

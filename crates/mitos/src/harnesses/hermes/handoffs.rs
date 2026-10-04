@@ -53,7 +53,7 @@ fn find_session(
         let rows = database.query("SELECT * FROM sessions WHERE id = ?", params![requested])?;
         return Ok(rows.into_iter().next());
     }
-    let threshold = DateTime::parse_from_rfc3339(&request.launched_at)
+    let threshold = DateTime::parse_from_rfc3339(request.launched_at.as_str())
         .ok()
         .map(|launched| launched.timestamp_millis() as f64 - LAUNCH_SLACK_MS);
     let Some(threshold) = threshold else {
@@ -129,6 +129,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::domain::HarnessKind;
     use crate::history::create_database;
 
     const SCHEMA: &str = "CREATE TABLE sessions (
@@ -212,9 +213,9 @@ mod tests {
 
     fn request(native_session: Option<&str>) -> HandoffRequest {
         HandoffRequest::collect(
-            "hermes",
+            HarnessKind::Hermes,
             Path::new("/workspace"),
-            chrono::Utc::now().to_rfc3339(),
+            crate::domain::now(),
             native_session.map(|session| json!(session)),
         )
     }

@@ -2,10 +2,11 @@ use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
+use crate::domain::HarnessKind;
 use crate::hooks::files::{backup, blocked_reason, read_text, write_atomic};
 use crate::hooks::reports::{HookStatus, InitOutcome, InitResult, Trust};
 
-const HARNESS: &str = "codex";
+const HARNESS: HarnessKind = HarnessKind::Codex;
 const MARKER: &str = "mitos hook codex";
 const EVENTS: [&str; 3] = ["SessionStart", "Stop", "SessionEnd"];
 const TIMEOUT_SECONDS: u64 = 10;
@@ -39,7 +40,7 @@ pub fn status(hooks: &Path, config: &Path) -> HookStatus {
         Trust::NotApplicable
     };
     HookStatus {
-        harness: HARNESS.into(),
+        harness: HARNESS,
         target: hooks.display().to_string(),
         installed,
         trust,

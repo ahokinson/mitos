@@ -5,127 +5,66 @@ mod turns;
 use std::ffi::OsStr;
 use std::path::Path;
 
-use anyhow::{Result, bail};
-use serde_json::Value;
+use anyhow::Result;
 
 use self::handoffs::collect_hermes_handoff;
-use self::turns::{Turn, run_turn};
-use crate::adapters::Emitter;
+use self::turns::run_turn;
+use crate::harnesses::{Emitter, Harness, Turn};
 use crate::history::harness_home;
-use crate::json::string_value;
-use crate::ports::{EventSink, HarnessAdapter};
-use crate::wire::events::{AdapterEvent, kinds};
-use crate::wire::requests::{
-    AdapterRequest, AttachThreadRequest, DetachThreadRequest, HandoffRequest, SendMessageRequest,
-    StartThreadRequest,
-};
-use crate::wire::responses::{Capabilities, CollectedHandoff, LaunchPlan};
-
-const PROGRAM: &str = "hermes";
+use crate::wire::requests::HandoffRequest;
+use crate::wire::responses::{Capabilities, CollectedHandoff};
 
 /// Interactive hermes cannot take an initial prompt and keep its REPL, so the
 /// handoff is printed by Mitos and a linked session resumes in the Mitos
 /// workspace. Headless turns run over `hermes acp`; no plan mode is offered.
 pub struct HermesAdapter;
 
-fn turn_result(
-    turn: &Turn<'_>,
-    on_event: &mut EventSink<'_>,
-    answers: Option<&Path>,
-) -> Result<Option<Value>> {
-    Emitter::collect(on_event, |emitter| {
-        run_turn(OsStr::new(PROGRAM), turn, emitter, answers)
-    })
-}
+impl Harness for HermesAdapter {
+    const PROGRAM: &'static str = "hermes";
 
-impl HarnessAdapter for HermesAdapter {
-    fn negotiate(&self, _harness: &str) -> Result<Capabilities> {
-        Ok(Capabilities {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
             headless: true,
             modes: Vec::new(),
             ask_back: true,
-        })
+        }
     }
 
-    fn prepare_launch(&self, request: &AdapterRequest) -> Result<LaunchPlan> {
-        let session = string_value(request.native_session.as_ref());
-        let args = match session {
+    fn launch_args(&self, session: Option<&str>, _context: &str) -> Vec<String> {
+        match session {
             Some(session) => vec!["--resume".into(), session.into(), "--no-restore-cwd".into()],
             None => Vec::new(),
-        };
-        Ok(LaunchPlan::new(
-            PROGRAM,
-            args,
-            session.map(|session| Value::String(session.into())),
-        ))
+        }
     }
 
-    fn collect_handoff(&self, request: &HandoffRequest) -> Result<CollectedHandoff> {
+    fn run_turn(
+        &self,
+        turn: &Turn<'_>,
+        emitter: &mut Emitter<'_, '_>,
+        answers: Option<&Path>,
+    ) -> Result<()> {
+        run_turn(OsStr::new(Self::PROGRAM), turn, emitter, answers)
+    }
+
+    fn collect(&self, request: &HandoffRequest) -> Result<CollectedHandoff> {
         let home = harness_home("HERMES_HOME", ".hermes");
         Ok(collect_hermes_handoff(&home, request))
-    }
-
-    fn start_thread(
-        &self,
-        request: &StartThreadRequest,
-        on_event: &mut EventSink<'_>,
-        answers: Option<&Path>,
-    ) -> Result<Option<Value>> {
-        let turn = Turn {
-            workdir: &request.workdir,
-            text: &request.initial_context,
-            session: None,
-            ephemeral: request.ephemeral,
-        };
-        turn_result(&turn, on_event, answers)
-    }
-
-    fn attach_thread(
-        &self,
-        _request: &AttachThreadRequest,
-        on_event: &mut EventSink<'_>,
-    ) -> Result<()> {
-        Emitter::collect(on_event, |emitter| {
-            emitter.emit(AdapterEvent::new(kinds::TURN_COMPLETE))
-        })?;
-        Ok(())
-    }
-
-    fn send_message(
-        &self,
-        request: &SendMessageRequest,
-        on_event: &mut EventSink<'_>,
-        answers: Option<&Path>,
-    ) -> Result<()> {
-        let Some(session) = string_value(request.native_session.as_ref()) else {
-            bail!("send_message requires a native_session");
-        };
-        let turn = Turn {
-            workdir: &request.workdir,
-            text: &request.text,
-            session: Some(session),
-            ephemeral: false,
-        };
-        turn_result(&turn, on_event, answers)?;
-        Ok(())
-    }
-
-    fn detach_thread(&self, _request: &DetachThreadRequest) -> Result<()> {
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::*;
+    use crate::domain::HarnessKind;
+    use crate::ports::HarnessAdapter;
+    use crate::wire::requests::AdapterRequest;
+    use crate::wire::responses::LaunchPlan;
 
     fn launch(native_session: Option<Value>) -> LaunchPlan {
         let request =
-            AdapterRequest::prepare_launch("hermes", Path::new("/w"), "ctx".into(), native_session);
+            AdapterRequest::prepare_launch(HarnessKind::Hermes, "ctx".into(), native_session);
         HermesAdapter.prepare_launch(&request).unwrap()
     }
 
@@ -142,7 +81,7 @@ mod tests {
 
     #[test]
     fn is_headless_and_build_only_so_plan_reassignment_is_refused() {
-        let capabilities = HermesAdapter.negotiate("hermes").unwrap();
+        let capabilities = HermesAdapter.negotiate(HarnessKind::Hermes).unwrap();
         assert!(capabilities.headless);
         assert!(capabilities.modes.is_empty());
         assert!(capabilities.ask_back);

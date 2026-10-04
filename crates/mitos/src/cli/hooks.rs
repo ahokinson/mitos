@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use super::args::{HookArgs, HooksCommand};
 use super::outputs::emit;
+use crate::domain::{HarnessKind, ThreadId, Timestamp};
 use crate::hooks::{self, HookStatus, InitOutcome, InitResult, Locations, Trust};
 use crate::store::Store;
 
@@ -34,14 +35,18 @@ pub fn collect(state_dir: Option<PathBuf>, args: &HookArgs) -> Result<()> {
 
 fn record(state_dir: Option<PathBuf>, args: &HookArgs, input: &[u8]) -> Result<()> {
     let payload: Value = serde_json::from_slice(input)?;
-    let Some(observation) = hooks::parse(&args.harness, args.event.as_deref(), &payload) else {
+    let Ok(harness) = args.harness.parse() else {
+        return Ok(());
+    };
+    let Some(observation) = hooks::parse(harness, args.event.as_deref(), &payload) else {
         return Ok(());
     };
     let store = Store::new(state_dir)?;
     let thread = std::env::var("MITOS_THREAD_ID")
         .ok()
-        .filter(|id| !id.is_empty());
-    store.record_observation(&observation, thread.as_deref())
+        .filter(|id| !id.is_empty())
+        .map(ThreadId::from);
+    store.record_observation(&observation, thread.as_ref())
 }
 
 pub fn dispatch(store: &Store, command: HooksCommand) -> Result<()> {
@@ -69,15 +74,18 @@ pub fn dispatch(store: &Store, command: HooksCommand) -> Result<()> {
     }
 }
 
-fn approval_step(harness: &str) -> Option<&'static str> {
+fn approval_step(harness: HarnessKind) -> Option<&'static str> {
     match harness {
-        "codex" => Some("approve it with /hooks inside Codex"),
-        "hermes" => Some("approve it on Hermes's first run, or set hooks_auto_accept: true"),
-        _ => None,
+        HarnessKind::Codex => Some("approve it with /hooks inside Codex"),
+        HarnessKind::Hermes => {
+            Some("approve it on Hermes's first run, or set hooks_auto_accept: true")
+        }
+        HarnessKind::Claude | HarnessKind::OpenCode => None,
     }
 }
 
-fn relative_time(iso: &str, now: DateTime<Utc>) -> String {
+fn relative_time(timestamp: &Timestamp, now: DateTime<Utc>) -> String {
+    let iso = timestamp.as_str();
     let Ok(seen) = DateTime::parse_from_rfc3339(iso) else {
         return "at an unknown time".into();
     };
@@ -93,7 +101,7 @@ fn relative_time(iso: &str, now: DateTime<Utc>) -> String {
 fn state_of(status: &HookStatus) -> String {
     match (status.installed, status.trust) {
         (false, _) => "not installed".into(),
-        (true, Trust::Untrusted) => match approval_step(&status.harness) {
+        (true, Trust::Untrusted) => match approval_step(status.harness) {
             Some(step) => format!("installed, NOT APPROVED yet: {step}"),
             None => "installed, NOT APPROVED yet by the harness".into(),
         },
@@ -159,9 +167,9 @@ fn print_lines(lines: Vec<String>) {
 mod tests {
     use super::*;
 
-    fn status(harness: &str) -> HookStatus {
+    fn status(harness: HarnessKind) -> HookStatus {
         HookStatus {
-            harness: harness.into(),
+            harness,
             target: format!("/cfg/{harness}.json"),
             installed: true,
             trust: Trust::Trusted,
@@ -179,7 +187,7 @@ mod tests {
 
     #[test]
     fn relative_time_buckets_match_the_tui() {
-        let at = |iso| relative_time(iso, now());
+        let at = |iso: &str| relative_time(&iso.into(), now());
         assert_eq!(at("2026-10-03T11:59:30Z"), "just now");
         assert_eq!(at("2026-10-03T11:55:00Z"), "5m ago");
         assert_eq!(at("2026-10-03T09:00:00Z"), "3h ago");
@@ -189,9 +197,9 @@ mod tests {
 
     #[test]
     fn untrusted_hooks_name_the_harness_specific_approval_step() {
-        let mut codex = status("codex");
+        let mut codex = status(HarnessKind::Codex);
         codex.trust = Trust::Untrusted;
-        let mut claude = status("claude");
+        let mut claude = status(HarnessKind::Claude);
         claude.trust = Trust::Untrusted;
         let lines = status_lines(&[codex, claude], now());
         assert_eq!(
@@ -206,12 +214,12 @@ mod tests {
 
     #[test]
     fn status_reports_problems_last_data_and_a_footer() {
-        let mut broken = status("claude");
+        let mut broken = status(HarnessKind::Claude);
         broken.installed = false;
         broken.blocked_by = Some("read-only".into());
         broken.problems = vec!["invalid JSON".into()];
         broken.last_seen = Some("2026-10-03T11:55:00Z".into());
-        let lines = status_lines(&[broken, status("opencode")], now());
+        let lines = status_lines(&[broken, status(HarnessKind::OpenCode)], now());
         assert_eq!(
             lines[..5],
             [

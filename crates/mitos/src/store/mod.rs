@@ -1,5 +1,6 @@
 mod bindings;
 mod carryovers;
+mod errors;
 mod events;
 #[cfg(test)]
 mod fixtures;
@@ -21,8 +22,10 @@ use anyhow::{Context, Result};
 use libsql::{Connection, Database};
 
 use crate::config::resolve_root;
+use crate::domain::ThreadId;
 
 pub use carryovers::NewHandoffCarryover;
+pub use errors::StoreError;
 pub use locks::StoreLock;
 pub use requests::NewHarnessRequest;
 pub use usage::{PlanUsageFields, UsageFields};
@@ -72,7 +75,7 @@ impl Store {
         &self.root
     }
 
-    pub fn lock_thread(&self, id: &str) -> Result<StoreLock> {
+    pub fn lock_thread(&self, id: &ThreadId) -> Result<StoreLock> {
         locks::lock_file(&self.root.join("locks").join(format!("thread-{id}.lock")))
     }
 }

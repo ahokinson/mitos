@@ -3,9 +3,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::domain::{EventKind, ThreadEvent};
-
-const EDIT_TOOLS: [&str; 4] = ["edit", "write", "multiedit", "notebookedit"];
+use crate::domain::{EventKind, ThreadEvent, ToolKind};
 
 /// Paths the harnesses reported editing or writing, relative to the workspace
 /// and in the order first seen. Reads the four harnesses' tool payloads as
@@ -40,9 +38,8 @@ pub fn contents_of(events: &[ThreadEvent], kind: EventKind) -> Vec<String> {
 
 fn payload_paths(payload: &Value) -> Vec<&str> {
     let text = |pointer: &str| payload.pointer(pointer).and_then(Value::as_str);
-    let is_edit = |pointer: &str| {
-        text(pointer).is_some_and(|name| EDIT_TOOLS.contains(&name.to_lowercase().as_str()))
-    };
+    let is_edit =
+        |pointer: &str| text(pointer).is_some_and(|name| ToolKind::named(name).edits_files());
     match payload.get("type").and_then(Value::as_str) {
         Some("tool_use") if is_edit("/name") => text("/input/file_path")
             .or_else(|| text("/input/notebook_path"))
@@ -95,7 +92,7 @@ mod tests {
             role: None,
             content: content.map(Into::into),
             payload,
-            created_at: String::new(),
+            created_at: "".into(),
         }
     }
 

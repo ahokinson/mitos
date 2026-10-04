@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use super::ThreadService;
 use super::usage::{plan_usage_fields, usage_fields};
-use crate::domain::{EventKind, NewThreadEvent, Thread, ThreadEvent, now};
+use crate::domain::{EventKind, HarnessKind, NewThreadEvent, Thread, ThreadEvent, ThreadId, now};
 use crate::handoff::{HandoffFacts, bounded_context, files_touched};
 use crate::ports::HarnessAdapter;
 use crate::wire::requests::HandoffRequest;
@@ -25,7 +25,7 @@ impl ThreadService<'_> {
 
     /// What the next harness needs to hear: everything from the latest
     /// compaction on, since the summary covers what came before.
-    pub(super) fn handoff_events(&self, thread_id: &str) -> Result<Vec<ThreadEvent>> {
+    pub(super) fn handoff_events(&self, thread_id: &ThreadId) -> Result<Vec<ThreadEvent>> {
         let mut events = self.store.events_since(thread_id, 0)?;
         if let Some(start) = events
             .iter()
@@ -57,7 +57,7 @@ impl ThreadService<'_> {
         workspace_root: &str,
         adapter: &A,
     ) -> Result<()> {
-        let Some(harness) = thread.active_harness.as_deref() else {
+        let Some(harness) = thread.active_harness else {
             return Ok(());
         };
         if thread.native_session.is_none() {
@@ -89,7 +89,7 @@ impl ThreadService<'_> {
     fn record_transcript(
         &self,
         thread: &Thread,
-        harness: &str,
+        harness: HarnessKind,
         events: Vec<NewThreadEvent>,
     ) -> Result<()> {
         let mut recorded = self.recorded_messages(&thread.id)?;
@@ -104,13 +104,13 @@ impl ThreadService<'_> {
                 *count -= 1;
                 continue;
             }
-            event.harness = Some(harness.into());
+            event.harness = Some(harness);
             self.store.append_event(&thread.id, event)?;
         }
         Ok(())
     }
 
-    fn recorded_messages(&self, thread_id: &str) -> Result<RecordedMessages> {
+    fn recorded_messages(&self, thread_id: &ThreadId) -> Result<RecordedMessages> {
         let mut recorded = RecordedMessages::new();
         for existing in self.store.events_since(thread_id, 0)? {
             if matches!(

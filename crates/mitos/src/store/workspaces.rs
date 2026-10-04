@@ -1,21 +1,22 @@
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use libsql::{Row, params};
 
-use super::Store;
-use crate::domain::{Workspace, id, now};
+use super::queries::text;
+use super::{Store, StoreError};
+use crate::domain::{Workspace, WorkspaceId, now};
 
 const COLUMNS: &str = "id, root, git_dir, workspace_key, created_at, updated_at";
 
 fn workspace_from_row(row: &Row) -> Result<Workspace> {
     Ok(Workspace {
-        id: row.get(0)?,
+        id: text(row, 0)?,
         root: row.get(1)?,
         git_dir: row.get(2)?,
         workspace_key: row.get(3)?,
-        created_at: row.get(4)?,
-        updated_at: row.get(5)?,
+        created_at: text(row, 4)?,
+        updated_at: text(row, 5)?,
     })
 }
 
@@ -30,7 +31,7 @@ impl Store {
             return Ok(workspace);
         }
         let workspace = Workspace {
-            id: id(),
+            id: WorkspaceId::generate(),
             root: root.to_string_lossy().into_owned(),
             git_dir: git_dir.map(|path| path.to_string_lossy().into_owned()),
             workspace_key: workspace_key.to_string(),
@@ -40,12 +41,12 @@ impl Store {
         let inserted = self.execute(
             &format!("INSERT INTO workspaces ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"),
             params![
-                workspace.id.clone(),
+                workspace.id.as_str(),
                 workspace.root.clone(),
                 workspace.git_dir.clone(),
                 workspace.workspace_key.clone(),
-                workspace.created_at.clone(),
-                workspace.updated_at.clone()
+                workspace.created_at.as_str(),
+                workspace.updated_at.as_str()
             ],
         );
         match inserted {
@@ -62,13 +63,13 @@ impl Store {
         )
     }
 
-    pub fn get_workspace(&self, id: &str) -> Result<Workspace> {
+    pub fn get_workspace(&self, id: &WorkspaceId) -> Result<Workspace> {
         self.query_optional(
             &format!("SELECT {COLUMNS} FROM workspaces WHERE id = ?1"),
-            params![id],
+            params![id.as_str()],
             workspace_from_row,
         )?
-        .context("no such workspace")
+        .ok_or(StoreError::NotFound("workspace").into())
     }
 }
 

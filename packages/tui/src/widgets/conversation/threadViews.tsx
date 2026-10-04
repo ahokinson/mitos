@@ -1,7 +1,6 @@
 import { For, Show, createMemo } from "solid-js";
 
 import type { PaneStyle } from "@layout/trees.ts";
-import { eventDiffs } from "@session/diffs.ts";
 import { EventKind, type ThreadEvent, accumulateAssistantDeltas, isDisplayEvent } from "@session/events.ts";
 import { foldedCallIds, isQuietResult, toolUseId } from "@session/tools.ts";
 import { FeedItemKind, type FeedItem, mergeFeed } from "@commands/feedbackLines.ts";
@@ -52,7 +51,7 @@ export function ThreadViewWidget(props: { paneStyle?: PaneStyle; focusId: string
               const isHidden = (candidate: FeedItem | undefined) =>
                 candidate?.kind === FeedItemKind.Event &&
                 (isFolded(candidate.event) ||
-                  (candidate.event.kind === EventKind.ToolResult && isQuietResult(candidate.event) && eventDiffs(candidate.event).length === 0));
+                  (candidate.event.kind === EventKind.ToolResult && isQuietResult(candidate.event) && !candidate.event.diffs?.length));
               const grouped = () => {
                 let at = index() - 1;
                 while (at >= 0 && isHidden(feed()[at])) at--;

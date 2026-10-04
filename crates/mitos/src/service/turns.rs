@@ -6,7 +6,7 @@ use serde_json::Value;
 use super::ThreadService;
 use super::bindings::ensure_supported;
 use super::usage::{plan_usage_fields, usage_fields};
-use crate::domain::{EventKind, NewThreadEvent, Thread, id};
+use crate::domain::{EventKind, HarnessKind, NewThreadEvent, Thread, ThreadId, TurnId};
 use crate::ipc::answers;
 use crate::ports::HarnessAdapter;
 use crate::wire::events::AdapterEvent;
@@ -14,24 +14,23 @@ use crate::wire::requests::{AttachThreadRequest, SendMessageRequest, StartThread
 
 struct Turn<'a> {
     thread: Thread,
-    harness: String,
-    id: &'a str,
+    harness: HarnessKind,
+    id: &'a TurnId,
     socket: Option<PathBuf>,
 }
 
 impl ThreadService<'_> {
     pub fn send<A: HarnessAdapter>(
         &self,
-        thread_id: &str,
+        thread_id: &ThreadId,
         text: String,
         adapter: &A,
-    ) -> Result<String> {
+    ) -> Result<TurnId> {
         let thread = self.store.get_thread(thread_id)?;
         thread
             .active_harness
-            .as_ref()
             .context("thread has no harness assigned; run `mitos thread reassign` first")?;
-        let turn_id = id();
+        let turn_id = TurnId::generate();
         self.store.append_event(
             thread_id,
             NewThreadEvent {
@@ -47,18 +46,17 @@ impl ThreadService<'_> {
 
     pub fn drive<A: HarnessAdapter>(
         &self,
-        thread_id: &str,
-        turn_id: &str,
+        thread_id: &ThreadId,
+        turn_id: &TurnId,
         adapter: &A,
     ) -> Result<()> {
         let _lock = self.store.lock_thread(thread_id)?;
         let thread = self.store.get_thread(thread_id)?;
         let harness = thread
             .active_harness
-            .clone()
             .context("thread has no harness assigned")?;
-        let capabilities = adapter.negotiate(&harness)?;
-        ensure_supported(&harness, &capabilities, thread.mode)?;
+        let capabilities = adapter.negotiate(harness)?;
+        ensure_supported(harness, &capabilities, thread.mode)?;
         let turn = Turn {
             thread,
             harness,
@@ -83,17 +81,15 @@ impl ThreadService<'_> {
         let workspace = self.store.get_workspace(&turn.thread.workspace_id)?;
         let text = self.store.user_message_for_turn(thread_id, turn.id)?;
         let request = SendMessageRequest::new(
-            &turn.harness,
-            thread_id,
+            turn.harness,
             PathBuf::from(&workspace.root),
             Some(native_session),
             turn.thread.mode,
-            turn.id,
             text,
         );
         adapter.send_message(
             &request,
-            &mut |event| self.record_adapter_event(thread_id, &turn.harness, turn.id, event),
+            &mut |event| self.record_adapter_event(thread_id, turn.harness, turn.id, event),
             turn.socket.as_deref(),
         )
     }
@@ -103,51 +99,48 @@ impl ThreadService<'_> {
         let workspace = self.store.get_workspace(&turn.thread.workspace_id)?;
         let context = self.render_handoff(&turn.thread)?;
         let request = StartThreadRequest::new(
-            &turn.harness,
-            thread_id,
+            turn.harness,
             PathBuf::from(&workspace.root),
             turn.thread.mode,
             context,
         );
         let native_session = adapter.start_thread(
             &request,
-            &mut |event| self.record_adapter_event(thread_id, &turn.harness, turn.id, event),
+            &mut |event| self.record_adapter_event(thread_id, turn.harness, turn.id, event),
             turn.socket.as_deref(),
         )?;
         if let Some(native_session) = native_session {
-            self.bind_harness(thread_id, &turn.harness, Some(&native_session))?;
+            self.bind_harness(thread_id, turn.harness, Some(&native_session))?;
         }
         Ok(())
     }
 
-    pub fn attach<A: HarnessAdapter>(&self, thread_id: &str, adapter: &A) -> Result<()> {
+    pub fn attach<A: HarnessAdapter>(&self, thread_id: &ThreadId, adapter: &A) -> Result<()> {
         let _lock = self.store.lock_thread(thread_id)?;
         let thread = self.store.get_thread(thread_id)?;
-        let Some(harness) = thread.active_harness.clone() else {
+        let Some(harness) = thread.active_harness else {
             return Ok(());
         };
-        if !adapter.negotiate(&harness)?.headless {
+        if !adapter.negotiate(harness)?.headless {
             return Ok(());
         }
         let workspace = self.store.get_workspace(&thread.workspace_id)?;
-        let turn_id = id();
+        let turn_id = TurnId::generate();
         let request = AttachThreadRequest::new(
-            &harness,
-            thread_id,
+            harness,
             PathBuf::from(&workspace.root),
             thread.native_session.clone(),
-            thread.last_event_seq,
         );
         adapter.attach_thread(&request, &mut |event| {
-            self.record_adapter_event(thread_id, &harness, &turn_id, event)
+            self.record_adapter_event(thread_id, harness, &turn_id, event)
         })
     }
 
     fn record_adapter_event(
         &self,
-        thread_id: &str,
-        harness: &str,
-        turn_id: &str,
+        thread_id: &ThreadId,
+        harness: HarnessKind,
+        turn_id: &TurnId,
         event: AdapterEvent,
     ) -> Result<()> {
         if event.event == "request" {
@@ -177,8 +170,8 @@ impl ThreadService<'_> {
         self.store.append_event(
             thread_id,
             NewThreadEvent {
-                turn_id: Some(turn_id.into()),
-                harness: Some(harness.into()),
+                turn_id: Some(turn_id.clone()),
+                harness: Some(harness),
                 role: event.role,
                 content: event.content,
                 payload: event.payload,

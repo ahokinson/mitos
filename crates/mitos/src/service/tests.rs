@@ -6,7 +6,10 @@ use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 
 use super::ThreadService;
-use crate::domain::{CompactMode, EventKind, RequestStatus, ThreadMode, ThreadStatus, id};
+use crate::domain::{
+    CompactMode, EventKind, HarnessKind, Reply, RequestStatus, ThreadId, ThreadMode, ThreadStatus,
+    id,
+};
 use crate::handoff::DeterministicRenderer;
 use crate::ports::{EventSink, HarnessAdapter};
 use crate::store::Store;
@@ -57,7 +60,7 @@ fn emit(events: &[Value], on_event: &mut EventSink<'_>) -> Result<()> {
 }
 
 impl HarnessAdapter for FakeAdapter {
-    fn negotiate(&self, _harness: &str) -> Result<Capabilities> {
+    fn negotiate(&self, _harness: HarnessKind) -> Result<Capabilities> {
         self.calls.borrow_mut().push("negotiate");
         Ok(serde_json::from_value(self.capabilities.clone())?)
     }
@@ -139,7 +142,7 @@ impl Fixture {
         ThreadService::new(&self.store, &DeterministicRenderer)
     }
 
-    fn thread(&self, harness: Option<&str>) -> String {
+    fn thread(&self, harness: Option<&str>) -> ThreadId {
         let workspace = self
             .store
             .workspace_for(Path::new("/workspace"), None, "key")
@@ -147,13 +150,13 @@ impl Fixture {
         let thread = self.store.create_thread(&workspace.id).unwrap();
         if let Some(harness) = harness {
             self.service()
-                .bind_harness(&thread.id, harness, None)
+                .bind_harness(&thread.id, harness.parse().unwrap(), None)
                 .unwrap();
         }
         thread.id
     }
 
-    fn kinds(&self, thread_id: &str) -> Vec<EventKind> {
+    fn kinds(&self, thread_id: &ThreadId) -> Vec<EventKind> {
         self.store
             .events_since(thread_id, 0)
             .unwrap()
@@ -217,14 +220,14 @@ fn send_records_user_message_and_adapter_events_in_order() {
     assert!(
         events[1..]
             .iter()
-            .all(|event| event.turn_id.as_deref() == Some(turn_id.as_str()))
+            .all(|event| event.turn_id.as_ref() == Some(&turn_id))
     );
     assert_eq!(events[2].payload, Some(json!({"name": "Edit"})));
-    assert_eq!(events[2].harness.as_deref(), Some("claude"));
+    assert_eq!(events[2].harness, Some(HarnessKind::Claude));
     assert_eq!(
         fixture
             .store
-            .plan_usage("claude")
+            .plan_usage(HarnessKind::Claude)
             .unwrap()
             .unwrap()
             .plan_week_percent,
@@ -353,7 +356,7 @@ fn a_harness_without_headless_mode_is_refused() {
 
     let error = fixture
         .service()
-        .reassign_harness(&thread_id, "claude", &adapter)
+        .reassign_harness(&thread_id, HarnessKind::Claude, &adapter)
         .unwrap_err();
 
     assert!(error.to_string().contains("no headless mode"));
@@ -365,7 +368,7 @@ fn reassign_collects_evidence_records_a_carryover_and_rebinds() {
     let thread_id = fixture.thread(Some("claude"));
     fixture
         .store
-        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
+        .set_thread_harness(&thread_id, Some(HarnessKind::Claude), Some(&json!("old")))
         .unwrap();
     let mut adapter = FakeAdapter::new();
     adapter.handoff = Some(handoff_with(
@@ -375,11 +378,11 @@ fn reassign_collects_evidence_records_a_carryover_and_rebinds() {
 
     fixture
         .service()
-        .reassign_harness(&thread_id, "codex", &adapter)
+        .reassign_harness(&thread_id, HarnessKind::Codex, &adapter)
         .unwrap();
 
     let thread = fixture.store.get_thread(&thread_id).unwrap();
-    assert_eq!(thread.active_harness.as_deref(), Some("codex"));
+    assert_eq!(thread.active_harness, Some(HarnessKind::Codex));
     assert_eq!(thread.native_session, None);
     assert_eq!(
         fixture.kinds(&thread_id),
@@ -395,7 +398,7 @@ fn reassign_collects_evidence_records_a_carryover_and_rebinds() {
     assert_eq!(
         fixture
             .store
-            .plan_usage("claude")
+            .plan_usage(HarnessKind::Claude)
             .unwrap()
             .unwrap()
             .plan_five_hour_percent,
@@ -409,7 +412,7 @@ fn reassign_does_not_duplicate_messages_the_log_already_has() {
     let thread_id = fixture.thread(Some("claude"));
     fixture
         .store
-        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("s")))
+        .set_thread_harness(&thread_id, Some(HarnessKind::Claude), Some(&json!("s")))
         .unwrap();
     let mut adapter = FakeAdapter::new();
     adapter.handoff = Some(handoff_with(
@@ -430,7 +433,7 @@ fn reassign_does_not_duplicate_messages_the_log_already_has() {
 
     fixture
         .service()
-        .reassign_harness(&thread_id, "codex", &adapter)
+        .reassign_harness(&thread_id, HarnessKind::Codex, &adapter)
         .unwrap();
 
     let assistant_messages = fixture
@@ -453,19 +456,19 @@ fn reassign_leaves_the_thread_untouched_when_collection_fails() {
     let thread_id = fixture.thread(Some("claude"));
     fixture
         .store
-        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("s")))
+        .set_thread_harness(&thread_id, Some(HarnessKind::Claude), Some(&json!("s")))
         .unwrap();
     let adapter = FakeAdapter::new();
     let before = fixture.store.events_since(&thread_id, 0).unwrap().len();
 
     let error = fixture
         .service()
-        .reassign_harness(&thread_id, "codex", &adapter)
+        .reassign_harness(&thread_id, HarnessKind::Codex, &adapter)
         .unwrap_err();
 
     assert!(error.to_string().contains("collection failed"));
     let thread = fixture.store.get_thread(&thread_id).unwrap();
-    assert_eq!(thread.active_harness.as_deref(), Some("claude"));
+    assert_eq!(thread.active_harness, Some(HarnessKind::Claude));
     assert_eq!(thread.native_session, Some(json!("s")));
     assert_eq!(
         fixture.store.events_since(&thread_id, 0).unwrap().len(),
@@ -481,18 +484,13 @@ fn reassign_skips_collection_when_there_is_no_native_session() {
 
     fixture
         .service()
-        .reassign_harness(&thread_id, "codex", &adapter)
+        .reassign_harness(&thread_id, HarnessKind::Codex, &adapter)
         .unwrap();
 
     assert!(!adapter.calls().contains(&"collect_handoff"));
     assert_eq!(
-        fixture
-            .store
-            .get_thread(&thread_id)
-            .unwrap()
-            .active_harness
-            .as_deref(),
-        Some("codex")
+        fixture.store.get_thread(&thread_id).unwrap().active_harness,
+        Some(HarnessKind::Codex)
     );
 }
 
@@ -502,7 +500,7 @@ fn mechanical_compact_rebinds_the_same_harness_with_a_fresh_session() {
     let thread_id = fixture.thread(Some("claude"));
     fixture
         .store
-        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
+        .set_thread_harness(&thread_id, Some(HarnessKind::Claude), Some(&json!("old")))
         .unwrap();
     let mut adapter = FakeAdapter::new();
     adapter.handoff = Some(handoff_with(&[("user", "hi")], &json!("old")));
@@ -513,7 +511,7 @@ fn mechanical_compact_rebinds_the_same_harness_with_a_fresh_session() {
         .unwrap();
 
     let thread = fixture.store.get_thread(&thread_id).unwrap();
-    assert_eq!(thread.active_harness.as_deref(), Some("claude"));
+    assert_eq!(thread.active_harness, Some(HarnessKind::Claude));
     assert_eq!(thread.native_session, None);
     assert!(!adapter.calls().contains(&"send_message"));
     assert!(!fixture.kinds(&thread_id).contains(&EventKind::Compaction));
@@ -525,7 +523,7 @@ fn intelligent_compact_seeds_the_fresh_session_with_the_summary() {
     let thread_id = fixture.thread(Some("claude"));
     fixture
         .store
-        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
+        .set_thread_harness(&thread_id, Some(HarnessKind::Claude), Some(&json!("old")))
         .unwrap();
     fixture
         .store
@@ -552,7 +550,7 @@ fn intelligent_compact_seeds_the_fresh_session_with_the_summary() {
         .unwrap();
 
     let thread = fixture.store.get_thread(&thread_id).unwrap();
-    assert_eq!(thread.active_harness.as_deref(), Some("claude"));
+    assert_eq!(thread.active_harness, Some(HarnessKind::Claude));
     assert_eq!(thread.native_session, None);
     assert!(!adapter.calls().contains(&"send_message"));
     let summarizing = adapter.ephemeral_starts.borrow().clone();
@@ -597,7 +595,7 @@ fn intelligent_compact_leaves_the_binding_when_no_summary_comes_back() {
     let thread_id = fixture.thread(Some("claude"));
     fixture
         .store
-        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
+        .set_thread_harness(&thread_id, Some(HarnessKind::Claude), Some(&json!("old")))
         .unwrap();
     let mut adapter = FakeAdapter::new();
     adapter.handoff = Some(handoff_with(&[], &json!("old")));
@@ -619,7 +617,7 @@ fn intelligent_compact_reports_why_the_summary_failed() {
     let thread_id = fixture.thread(Some("claude"));
     fixture
         .store
-        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
+        .set_thread_harness(&thread_id, Some(HarnessKind::Claude), Some(&json!("old")))
         .unwrap();
     let mut adapter = FakeAdapter::new();
     adapter.handoff = Some(handoff_with(&[], &json!("old")));
@@ -642,7 +640,7 @@ fn the_summary_session_is_not_read_only_when_the_harness_cannot_enforce_plan_mod
     let thread_id = fixture.thread(Some("hermes"));
     fixture
         .store
-        .set_thread_harness(&thread_id, Some("hermes"), Some(&json!("old")))
+        .set_thread_harness(&thread_id, Some(HarnessKind::Hermes), Some(&json!("old")))
         .unwrap();
     let mut adapter = FakeAdapter::new();
     adapter.capabilities = json!({"headless": true, "modes": []});
@@ -733,7 +731,7 @@ fn tool_output_is_pruned_before_the_conversation_is_cut() {
     assert!(!context.contains("Earlier Mitos handoff material omitted"));
 }
 
-fn record(fixture: &Fixture, thread_id: &str, new: crate::domain::NewThreadEvent) {
+fn record(fixture: &Fixture, thread_id: &ThreadId, new: crate::domain::NewThreadEvent) {
     fixture.store.append_event(thread_id, new).unwrap();
 }
 
@@ -766,7 +764,7 @@ fn a_handoff_records_the_decisions_and_questions_it_carried() {
     let thread_id = fixture.thread(Some("claude"));
     fixture
         .store
-        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
+        .set_thread_harness(&thread_id, Some(HarnessKind::Claude), Some(&json!("old")))
         .unwrap();
     for (kind, content) in [
         (EventKind::Decision, "use libSQL"),
@@ -786,7 +784,7 @@ fn a_handoff_records_the_decisions_and_questions_it_carried() {
 
     fixture
         .service()
-        .reassign_harness(&thread_id, "codex", &adapter)
+        .reassign_harness(&thread_id, HarnessKind::Codex, &adapter)
         .unwrap();
 
     let carryovers = fixture.store.handoff_carryovers(&thread_id).unwrap();
@@ -838,7 +836,7 @@ fn reassign_cancels_requests_still_pending() {
 
     fixture
         .service()
-        .reassign_harness(&thread_id, "codex", &adapter)
+        .reassign_harness(&thread_id, HarnessKind::Codex, &adapter)
         .unwrap();
 
     assert!(
@@ -873,7 +871,7 @@ fn request_events_open_a_pending_request_instead_of_a_thread_event() {
     let pending = fixture.service().pending_requests(&thread_id).unwrap();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].status, RequestStatus::Pending);
-    assert_eq!(pending[0].harness.as_deref(), Some("claude"));
+    assert_eq!(pending[0].harness, Some(HarnessKind::Claude));
     assert_eq!(pending[0].payload.as_ref().unwrap()["id"], "native-1");
 }
 
@@ -926,7 +924,11 @@ fn answer_rejects_a_request_from_another_thread() {
 
     let error = fixture
         .service()
-        .answer("some-other-thread", &request.id, &json!({"allow": true}))
+        .answer(
+            &"some-other-thread".into(),
+            &request.id,
+            &json!({"allow": true}),
+        )
         .unwrap_err();
 
     assert!(error.to_string().contains("does not belong"));
@@ -1007,6 +1009,41 @@ fn answering_an_already_resolved_request_fails() {
 }
 
 #[test]
+fn a_reply_the_request_kind_cannot_take_fails_before_anything_is_sent() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(Some("claude"));
+    let mut adapter = FakeAdapter::new();
+    adapter.start_events = vec![json!({
+        "event": "request",
+        "payload": {"id": "q1", "kind": "question", "title": "which?"},
+    })];
+    fixture
+        .service()
+        .send(&thread_id, "go".into(), &adapter)
+        .unwrap();
+    let request = fixture
+        .service()
+        .pending_requests(&thread_id)
+        .unwrap()
+        .remove(0);
+
+    let error = fixture
+        .service()
+        .reply(&thread_id, &request.id, &Reply::Approve)
+        .unwrap_err();
+
+    assert!(error.to_string().contains("needs a text answer"));
+    assert_eq!(
+        fixture
+            .service()
+            .pending_requests(&thread_id)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn archive_detaches_unbinds_and_marks_the_thread_archived() {
     let fixture = Fixture::new();
     let thread_id = fixture.thread(Some("claude"));
@@ -1081,6 +1118,57 @@ fn attach_without_a_harness_does_not_call_the_adapter() {
     fixture.service().attach(&thread_id, &adapter).unwrap();
 
     assert!(adapter.calls().is_empty());
+}
+
+#[test]
+fn event_views_carry_the_diffs_of_tool_events_only() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(Some("claude"));
+    let patch = json!({
+        "type": "tool_result",
+        "tool_use_result": {
+            "filePath": "/workspace/a.rs",
+            "structuredPatch": [
+                { "oldStart": 4, "newStart": 4, "lines": [" keep", "-old", "+new"] }
+            ]
+        }
+    });
+    for (kind, payload) in [
+        (EventKind::ToolResult, Some(patch.clone())),
+        (
+            EventKind::ToolResult,
+            Some(json!({ "type": "tool_result" })),
+        ),
+        (EventKind::Status, Some(patch)),
+    ] {
+        record(
+            &fixture,
+            &thread_id,
+            crate::domain::NewThreadEvent {
+                payload,
+                ..crate::domain::NewThreadEvent::new(kind)
+            },
+        );
+    }
+
+    let views = fixture.service().event_views(&thread_id, 1).unwrap();
+
+    let counts: Vec<usize> = views.iter().map(|view| view.diffs.len()).collect();
+    assert_eq!(counts, [1, 0, 0]);
+    assert_eq!(views[0].diffs[0].path, "/workspace/a.rs");
+    assert!(views[0].diffs[0].diff.contains("@@ -4,2 +4,2 @@"));
+    let wire = serde_json::to_value(&views[0]).unwrap();
+    assert_eq!(wire["kind"], "tool_result");
+    assert_eq!(wire["diffs"][0]["added"], 1);
+    assert_eq!(wire["tool"]["shape"], "tool_result");
+    assert!(views[0].tool.as_ref().is_some_and(|tool| !tool.patched));
+    assert!(views[2].tool.is_none());
+    assert!(
+        serde_json::to_value(&views[2])
+            .unwrap()
+            .get("tool")
+            .is_none()
+    );
 }
 
 #[test]

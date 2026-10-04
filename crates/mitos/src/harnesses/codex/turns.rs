@@ -13,8 +13,8 @@ use serde_json::{Map, Value, json};
 use super::requests::{PendingServerRequest, request_from_server, result_for};
 use super::streams::{process_notification, process_turn_completed};
 use super::tokens::TurnTokens;
-use crate::adapters::Emitter;
 use crate::domain::ThreadMode;
+use crate::harnesses::{Emitter, Turn};
 use crate::ipc::answers::AnswerListener;
 use crate::rpc::{Inbound, RpcPeer, RpcWriter};
 use crate::wire::events::{AdapterEvent, kinds};
@@ -22,14 +22,6 @@ use crate::wire::events::{AdapterEvent, kinds};
 const METHOD_NOT_FOUND: i64 = -32601;
 const NO_THREAD_ID: &str = "codex did not return a thread id";
 const NOT_COMPLETED: &str = "codex ended without completing the turn";
-
-pub struct Turn<'a> {
-    pub workdir: &'a Path,
-    pub text: &'a str,
-    pub session: Option<&'a str>,
-    pub mode: ThreadMode,
-    pub ephemeral: bool,
-}
 
 type SharedPending = Arc<Mutex<HashMap<String, PendingServerRequest>>>;
 

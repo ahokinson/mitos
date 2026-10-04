@@ -2,10 +2,11 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
+use crate::domain::HarnessKind;
 use crate::hooks::files::{backup, blocked_reason, read_text, write_atomic};
 use crate::hooks::reports::{HookStatus, InitOutcome, InitResult, Trust};
 
-const HARNESS: &str = "claude";
+const HARNESS: HarnessKind = HarnessKind::Claude;
 const MARKER: &str = "mitos hook claude";
 
 pub fn status(settings: &Path) -> HookStatus {
@@ -19,7 +20,7 @@ pub fn status(settings: &Path) -> HookStatus {
         }
     };
     HookStatus {
-        harness: HARNESS.into(),
+        harness: HARNESS,
         target: settings.display().to_string(),
         installed,
         trust: Trust::NotApplicable,

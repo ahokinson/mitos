@@ -123,8 +123,8 @@ stdenvNoCC.mkDerivation {
     runHook postInstall
   '';
 
-  # mitos resolves its TUI/adapters directory from its own executable's
-  # path (bin/../lib/mitos — see crates/mitos/src/adapters/resolvers.rs), which
+  # mitos resolves its TUI directory from its own executable's
+  # path (bin/../lib/mitos — see crates/mitos/src/cli/tuis.rs), which
   # survives wrapProgram's rename-and-wrap trick since the wrapper keeps the
   # real binary in the same bin/ directory. MITOS_BUN pins the exact bun
   # this package was built against instead of trusting the caller's PATH.

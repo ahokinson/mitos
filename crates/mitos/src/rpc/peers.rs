@@ -8,16 +8,9 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 /// The peer closed its output while a request was still waiting.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("rpc peer exited")]
 pub struct PeerExited;
-
-impl std::fmt::Display for PeerExited {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("rpc peer exited")
-    }
-}
-
-impl std::error::Error for PeerExited {}
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 #[serde(untagged)]

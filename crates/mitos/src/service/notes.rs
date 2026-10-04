@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 
 use super::ThreadService;
-use crate::domain::{EventKind, NewThreadEvent};
+use crate::domain::{EventKind, HarnessKind, NewThreadEvent, ThreadId};
 
 pub struct ThreadNotes {
     pub note: Option<String>,
@@ -16,7 +16,7 @@ impl ThreadNotes {
 }
 
 impl ThreadService<'_> {
-    pub fn note(&self, thread_id: &str, notes: ThreadNotes) -> Result<()> {
+    pub fn note(&self, thread_id: &ThreadId, notes: ThreadNotes) -> Result<()> {
         if notes.is_empty() {
             bail!("provide --note, --decision, or --question");
         }
@@ -25,8 +25,8 @@ impl ThreadService<'_> {
 
     pub(super) fn record_notes(
         &self,
-        thread_id: &str,
-        harness: Option<&str>,
+        thread_id: &ThreadId,
+        harness: Option<HarnessKind>,
         notes: ThreadNotes,
     ) -> Result<()> {
         let entries = notes
@@ -49,7 +49,7 @@ impl ThreadService<'_> {
             self.store.append_event(
                 thread_id,
                 NewThreadEvent {
-                    harness: harness.map(Into::into),
+                    harness,
                     content: Some(content),
                     ..NewThreadEvent::new(kind)
                 },

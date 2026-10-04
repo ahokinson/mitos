@@ -10,18 +10,10 @@ use serde_json::Value;
 
 use super::controls::{PendingControl, control_response_for, request_from_control};
 use super::streams::{process_stream_line, user_message};
-use crate::adapters::Emitter;
 use crate::domain::ThreadMode;
+use crate::harnesses::{Emitter, Turn};
 use crate::ipc::answers::AnswerListener;
 use crate::wire::events::{AdapterEvent, kinds};
-
-pub struct Turn<'a> {
-    pub workdir: &'a Path,
-    pub text: &'a str,
-    pub resume: Option<&'a str>,
-    pub mode: ThreadMode,
-    pub ephemeral: bool,
-}
 
 type SharedStdin = Arc<Mutex<Option<ChildStdin>>>;
 type SharedPending = Arc<Mutex<HashMap<String, PendingControl>>>;
@@ -48,7 +40,7 @@ fn arguments(turn: &Turn<'_>) -> Vec<String> {
     ]
     .map(String::from)
     .into();
-    if let Some(session) = turn.resume {
+    if let Some(session) = turn.session {
         args.extend(["--resume".into(), session.into()]);
     }
     if turn.ephemeral {
@@ -185,7 +177,7 @@ mod tests {
             let turn = Turn {
                 workdir: dir,
                 text: "hello",
-                resume: None,
+                session: None,
                 mode: ThreadMode::Build,
                 ephemeral: false,
             };
@@ -239,7 +231,7 @@ echo '{"type":"result"}'"#,
         let turn = Turn {
             workdir: &fake.dir,
             text: "hello",
-            resume: Some("s-9"),
+            session: Some("s-9"),
             mode: ThreadMode::Plan,
             ephemeral: false,
         };
@@ -256,7 +248,7 @@ echo '{"type":"result"}'"#,
         let turn = Turn {
             workdir: Path::new("/w"),
             text: "t",
-            resume: Some("abc"),
+            session: Some("abc"),
             mode: ThreadMode::Plan,
             ephemeral: false,
         };
@@ -269,7 +261,7 @@ echo '{"type":"result"}'"#,
         assert_eq!(args[args.len() - 2..], ["--resume", "abc"]);
         let build = Turn {
             mode: ThreadMode::Build,
-            resume: None,
+            session: None,
             ..turn
         };
         assert!(arguments(&build).contains(&"bypassPermissions".to_string()));
