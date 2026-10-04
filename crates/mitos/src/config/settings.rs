@@ -8,10 +8,10 @@ pub fn handoff_max_inline_bytes(config_root: &Path) -> usize {
     let Ok(source) = fs::read_to_string(config_root.join("mitos.toml")) else {
         return DEFAULT_HANDOFF_MAX_INLINE_BYTES;
     };
-    let Ok(value) = source.parse::<toml::Value>() else {
+    let Ok(document) = source.parse::<toml::Table>() else {
         return DEFAULT_HANDOFF_MAX_INLINE_BYTES;
     };
-    value
+    document
         .get("handoff")
         .and_then(toml::Value::as_table)
         .and_then(|table| table.get("max_inline_bytes"))

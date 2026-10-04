@@ -186,7 +186,7 @@ fn trust_key(hooks: &Path, event: &str, group: usize, handler: usize) -> String 
 /// verified, so an edited hook at the same position still reads as trusted.
 fn is_trusted(config: &Path, key: &str) -> bool {
     read_text(config)
-        .and_then(|text| text.parse::<toml::Value>().ok())
+        .and_then(|text| text.parse::<toml::Table>().ok())
         .and_then(|value| {
             value
                 .get("hooks")?

@@ -25,12 +25,11 @@ test("transcript content wraps inside the space left by its glyph", async () => 
   try {
     await setup.renderOnce()
     const lines = setup.captureCharFrame().split("\n").filter((line) => line.trim().length > 0)
-    expect(lines).toHaveLength(5)
-    expect(lines[0]).toContain("›messages")
-    expect(lines[1]).toContain("wrap at")
-    expect(lines[2]).toContain("narrow")
-    expect(lines[3]).toContain("terminal")
-    expect(lines[4]).toContain("widths")
+    expect(lines).toHaveLength(4)
+    expect(lines[0]).toBe("›messages wrap")
+    expect(lines[1]).toBe(" at narrow    ")
+    expect(lines[2]).toBe(" terminal     ")
+    expect(lines[3]).toBe(" widths       ")
   } finally {
     setup.renderer.destroy()
   }
