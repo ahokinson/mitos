@@ -1,7 +1,11 @@
-import { expect, mock, test } from "bun:test";
+import { expect, test } from "bun:test";
 
 import type { CommandContext, PendingDelete } from "@commands/contexts.ts";
+import { dispatchCommand } from "@commands/dispatchers.ts";
 import { FeedbackTone } from "@commands/feedbackLines.ts";
+import { createThreadCommands } from "@commands/handlers/threads.ts";
+import { parseCommandInput } from "@commands/parsers.ts";
+import { COMMANDS } from "@commands/registries.ts";
 import {
   type HookInitOutcome,
   HookInitResult,
@@ -16,22 +20,10 @@ import {
 } from "@session/requests.ts";
 import { type Thread, ThreadMode, ThreadStatus } from "@session/threads.ts";
 
-// `detectInstalledHarnesses` does a real `Bun.which` PATH lookup — mocked so
-// these tests don't depend on what's actually installed on the machine
-// running them. Must happen before `dispatchers.ts` is imported, hence the
-// dynamic import below instead of a static one.
-mock.module("@harness/harnesses.ts", () => ({
-  KnownHarness: {
-    Claude: "claude",
-    Codex: "codex",
-    OpenCode: "opencode",
-    Hermes: "hermes",
-  },
-  KNOWN_HARNESSES: ["claude", "codex", "opencode", "hermes"],
-  detectInstalledHarnesses: () => ["claude", "codex"],
-}));
-
-const { dispatchCommand } = await import("@commands/dispatchers.ts");
+const TEST_COMMANDS = {
+  ...COMMANDS,
+  ...createThreadCommands(() => ["claude", "codex"]),
+};
 
 function thread(overrides: Partial<Thread> & { id: string }): Thread {
   return {
@@ -175,10 +167,9 @@ function createFakeContext(options: {
 }
 
 async function run(line: string, ctx: CommandContext): Promise<void> {
-  const { parseCommandInput } = await import("@commands/parsers.ts");
   const parsed = parseCommandInput(line);
   if (parsed.kind !== "command") throw new Error("expected a command");
-  await dispatchCommand(parsed.command, ctx);
+  await dispatchCommand(parsed.command, ctx, TEST_COMMANDS);
 }
 
 const CLAUDE_THREAD = thread({

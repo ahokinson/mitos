@@ -1,4 +1,4 @@
-import type { CommandContext } from "@commands/contexts.ts";
+import type { CommandContext, CommandEntry } from "@commands/contexts.ts";
 import { FeedbackTone } from "@commands/feedbackLines.ts";
 import type { ParsedCommand } from "@commands/parsers.ts";
 import { COMMANDS } from "@commands/registries.ts";
@@ -6,8 +6,9 @@ import { COMMANDS } from "@commands/registries.ts";
 export async function dispatchCommand(
   command: ParsedCommand,
   ctx: CommandContext,
+  commands: Readonly<Record<string, CommandEntry>> = COMMANDS,
 ): Promise<void> {
-  const entry = COMMANDS[command.name];
+  const entry = commands[command.name];
   if (!entry) {
     ctx.note(
       ctx.selected()?.id ?? null,
