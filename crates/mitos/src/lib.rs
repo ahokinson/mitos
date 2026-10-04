@@ -1,5 +1,8 @@
 pub mod cli;
 
+#[cfg(fuzzing)]
+pub mod fuzz;
+
 mod config;
 mod diffs;
 mod domain;

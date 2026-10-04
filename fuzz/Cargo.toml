@@ -1,0 +1,22 @@
+[package]
+name = "mitos-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+mitos = { path = "../crates/mitos" }
+
+[[bin]]
+name = "structured_payload"
+path = "fuzz_targets/structured_payload.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

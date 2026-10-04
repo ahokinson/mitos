@@ -10,6 +10,23 @@ bun run build
 development shell; other environments can install it with
 `cargo install cargo-llvm-cov --locked`.
 
+## Fuzzing
+
+ClusterFuzzLite runs the Rust `structured_payload` target for ten minutes on
+pull requests that modify the core, the fuzz target, or its build integration.
+It coverage-fuzzes JSON emitted by harnesses before that data is normalized for
+display or hook processing. Run it locally with a bounded campaign:
+
+```bash
+rustup toolchain install nightly
+cargo +nightly install cargo-fuzz --locked
+cargo +nightly fuzz run structured_payload -- -max_total_time=60
+```
+
+`cargo-fuzz` needs Rust nightly for its sanitizer instrumentation. The
+ClusterFuzzLite builder image supplies both, while the regular development
+shell intentionally stays on stable Rust.
+
 Tree-sitter parser binaries are sourced from the locked `tree-sitter-wasm`
 development dependency when building. They are copied into release bundles but
 are not stored in Git.
