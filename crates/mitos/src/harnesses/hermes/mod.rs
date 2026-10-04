@@ -75,6 +75,7 @@ impl HarnessAdapter for HermesAdapter {
             workdir: &request.workdir,
             text: &request.initial_context,
             session: None,
+            ephemeral: request.ephemeral,
         };
         turn_result(&turn, on_event, answers)
     }
@@ -103,6 +104,7 @@ impl HarnessAdapter for HermesAdapter {
             workdir: &request.workdir,
             text: &request.text,
             session: Some(session),
+            ephemeral: false,
         };
         turn_result(&turn, on_event, answers)?;
         Ok(())

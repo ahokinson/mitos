@@ -200,6 +200,11 @@ test("/archive stays quiet on an empty argument", () => {
 });
 
 test("/delete with nothing typed lists every thread, like /resume", () => {
-  expect(suggestFor("/delete ", ctx())).toEqual(suggestFor("/resume ", ctx()).map((item) => ({ ...item, insertText: item.insertText.replace("/resume", "/delete") })));
+  expect(suggestFor("/delete ", ctx())).toEqual(
+    suggestFor("/resume ", ctx()).map((item) => ({
+      ...item,
+      insertText: item.insertText.replace("/resume", "/delete"),
+    })),
+  );
   expect(suggestFor("/delete ", ctx()).length).toBeGreaterThan(0);
 });

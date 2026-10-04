@@ -28,6 +28,7 @@ pub struct Turn<'a> {
     pub text: &'a str,
     pub session: Option<&'a str>,
     pub mode: ThreadMode,
+    pub ephemeral: bool,
 }
 
 type SharedPending = Arc<Mutex<HashMap<String, PendingServerRequest>>>;
@@ -130,6 +131,9 @@ fn drive(turn: &Turn<'_>, peer: &mut RpcPeer, session: &mut Session<'_, '_, '_>)
     thread_params.insert("cwd".into(), json!(workdir));
     thread_params.insert("approvalPolicy".into(), json!("never"));
     thread_params.insert("sandbox".into(), json!(thread_sandbox(turn.mode)));
+    if turn.ephemeral {
+        thread_params.insert("ephemeral".into(), json!(true));
+    }
     let method = if turn.session.is_some() {
         "thread/resume"
     } else {
@@ -283,6 +287,7 @@ echo '{"id":3,"result":{}}'"#;
                 text: "hello",
                 session,
                 mode: ThreadMode::Build,
+                ephemeral: false,
             };
             let outcome = run_turn(fake.path.as_os_str(), &turn, &mut emitter, None);
             (emitter.into_native_session(), outcome)
@@ -351,6 +356,39 @@ cat >/dev/null"#,
             turn["params"]["sandboxPolicy"],
             json!({ "type": "dangerFullAccess" })
         );
+    }
+
+    #[test]
+    fn an_ephemeral_turn_starts_an_ephemeral_thread() {
+        let fake = FakeProgram::new(
+            r#"dir="$(dirname "$0")"
+read line
+echo '{"id":1,"result":{}}'
+read line
+read line
+printf '%s' "$line" > "$dir/thread"
+echo '{"id":2,"result":{"thread":{"id":"th-e"}}}'
+read line
+echo '{"id":3,"result":{}}'
+echo '{"method":"turn/completed","params":{"turn":{"status":"completed"}}}'
+cat >/dev/null"#,
+        );
+        let mut sink = |_: AdapterEvent| Ok(());
+        let mut emitter = Emitter::new(&mut sink);
+        let turn = Turn {
+            workdir: &fake.dir,
+            text: "hello",
+            session: None,
+            mode: ThreadMode::Plan,
+            ephemeral: true,
+        };
+        run_turn(fake.path.as_os_str(), &turn, &mut emitter, None).unwrap();
+        let thread: Value =
+            serde_json::from_str(&std::fs::read_to_string(fake.dir.join("thread")).unwrap())
+                .unwrap();
+        assert_eq!(thread["method"], "thread/start");
+        assert_eq!(thread["params"]["ephemeral"], true);
+        assert_eq!(thread["params"]["sandbox"], "read-only");
     }
 
     #[test]

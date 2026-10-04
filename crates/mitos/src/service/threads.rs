@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
@@ -9,9 +9,10 @@ use crate::domain::{
     UnbindReason,
 };
 use crate::git::Checkout;
+use crate::handoff::contents_of;
 use crate::ports::HarnessAdapter;
 use crate::store::NewHandoffCarryover;
-use crate::wire::requests::DetachThreadRequest;
+use crate::wire::requests::{DetachThreadRequest, StartThreadRequest};
 
 const SUMMARIZE_PROMPT: &str = "Summarize this conversation so it can continue in a fresh context. Cover the goal, decisions made, work completed, files touched, open questions and next steps. Reply with the summary only.";
 
@@ -89,34 +90,66 @@ impl ThreadService<'_> {
             .context("thread has no harness assigned")?;
         let summary = match mode {
             CompactMode::Mechanical => None,
-            CompactMode::Intelligent => {
-                Some(self.summarize_conversation(thread_id, thread.last_event_seq, adapter)?)
-            }
+            CompactMode::Intelligent => Some(self.summarize_conversation(thread_id, adapter)?),
         };
         self.rebind_harness(thread_id, &harness, summary, adapter)
     }
 
+    /// Runs in a throwaway session, read-only where the harness can enforce
+    /// it, so neither the thread's events nor its binding see the exchange.
     fn summarize_conversation<A: HarnessAdapter>(
         &self,
         thread_id: &str,
-        since_seq: i64,
         adapter: &A,
     ) -> Result<String> {
-        let turn_id = self.send(thread_id, SUMMARIZE_PROMPT.into(), adapter)?;
-        let summary = self
-            .store
-            .events_since(thread_id, since_seq)?
-            .into_iter()
-            .rev()
-            .find(|event| {
-                event.kind == EventKind::AssistantMessage
-                    && event.turn_id.as_deref() == Some(turn_id.as_str())
-            })
-            .and_then(|event| event.content)
-            .filter(|content| !content.trim().is_empty());
-        match summary {
-            Some(summary) => Ok(summary),
-            None => bail!("the harness returned no summary; thread left unchanged"),
+        let thread = self.store.get_thread(thread_id)?;
+        let harness = thread
+            .active_harness
+            .clone()
+            .context("thread has no harness assigned")?;
+        let capabilities = adapter.negotiate(&harness)?;
+        let mode = if capabilities.modes.contains(&ThreadMode::Plan) {
+            ThreadMode::Plan
+        } else {
+            ThreadMode::Build
+        };
+        ensure_supported(&harness, &capabilities, mode)?;
+        let workspace = self.store.get_workspace(&thread.workspace_id)?;
+        self.collect_handoff_evidence(&thread, &workspace.root, adapter)?;
+        let thread = self.store.get_thread(thread_id)?;
+        let text = format!(
+            "{}- user: {SUMMARIZE_PROMPT}\n",
+            self.render_handoff(&thread)?
+        );
+        let request = StartThreadRequest::new(
+            &harness,
+            thread_id,
+            PathBuf::from(&workspace.root),
+            mode,
+            text,
+        )
+        .ephemeral();
+
+        let mut summary = None;
+        let mut failure = None;
+        adapter.start_thread(
+            &request,
+            &mut |event| {
+                match event.event.as_str() {
+                    "assistant_message" => {
+                        summary = event.content.filter(|content| !content.trim().is_empty());
+                    }
+                    "error" => failure = event.content,
+                    _ => {}
+                }
+                Ok(())
+            },
+            None,
+        )?;
+        match (summary, failure) {
+            (Some(summary), _) => Ok(summary),
+            (None, Some(failure)) => bail!("summarizing failed: {failure}; thread left unchanged"),
+            (None, None) => bail!("the harness returned no summary; thread left unchanged"),
         }
     }
 
@@ -148,13 +181,14 @@ impl ThreadService<'_> {
         let from_harness = thread.active_harness.clone();
 
         let context = self.render_handoff(&thread)?;
+        let events = self.handoff_events(thread_id)?;
         self.store.record_handoff_carryover(NewHandoffCarryover {
             thread_id: thread_id.into(),
             from_harness: from_harness.clone(),
             to_harness: to_harness.into(),
             note: None,
-            decisions: Vec::new(),
-            questions: Vec::new(),
+            decisions: contents_of(&events, EventKind::Decision),
+            questions: contents_of(&events, EventKind::Question),
             bounded_context: context,
             source_event_seq_high_watermark: Some(thread.last_event_seq),
         })?;

@@ -33,7 +33,6 @@ let
       ../bun.lock
       ../scripts
       ../packages/tui
-      ../packages/adapters
     ];
   };
 
@@ -41,11 +40,10 @@ let
   # editing application source doesn't change this derivation's input and
   # force a pointless re-fetch of the exact same dependency set.
   bunManifest = runCommand "mitos-bun-manifest" { } ''
-    mkdir -p $out/packages/tui $out/packages/adapters
+    mkdir -p $out/packages/tui
     cp ${../package.json} $out/package.json
     cp ${../bun.lock} $out/bun.lock
     cp ${../packages/tui/package.json} $out/packages/tui/package.json
-    cp ${../packages/adapters/package.json} $out/packages/adapters/package.json
   '';
 
   # A sandboxed Nix build has no network access except inside a
@@ -71,10 +69,9 @@ let
       runHook postBuild
     '';
     installPhase = ''
-      mkdir -p "$out/packages/tui" "$out/packages/adapters"
+      mkdir -p "$out/packages/tui"
       cp -r node_modules "$out/"
       cp -r packages/tui/node_modules "$out/packages/tui/"
-      cp -r packages/adapters/node_modules "$out/packages/adapters/"
     '';
     outputHashMode = "recursive";
     outputHash = "sha256-ennGM4/3wuyuxkiW7eF23m1Pn0tF0GtlUMln586P+8I=";
@@ -112,7 +109,6 @@ stdenvNoCC.mkDerivation {
     export HOME="$TMPDIR"
     ln -s ${nodeModules}/node_modules ./node_modules
     ln -s ${nodeModules}/packages/tui/node_modules packages/tui/node_modules
-    ln -s ${nodeModules}/packages/adapters/node_modules packages/adapters/node_modules
     export MITOS_VENDORED_NODE_MODULES=${nodeModules}/node_modules
     export MITOS_SKIP_CARGO=1
     bun run scripts/build.ts

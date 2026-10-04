@@ -27,6 +27,7 @@ pub struct Turn<'a> {
     pub text: &'a str,
     pub session: Option<&'a str>,
     pub mode: ThreadMode,
+    pub ephemeral: bool,
 }
 
 pub type SharedPending = Arc<Mutex<HashMap<String, PendingAsk>>>;
@@ -73,6 +74,20 @@ fn run(
         Some(existing) => existing.to_string(),
         None => client.create_session()?,
     };
+    let outcome = stream_turn(client, turn, &session_id, emitter, pending);
+    if turn.ephemeral {
+        let _ = client.delete_session(&session_id);
+    }
+    outcome
+}
+
+fn stream_turn(
+    client: &ServerClient,
+    turn: &Turn<'_>,
+    session_id: &str,
+    emitter: &mut Emitter<'_, '_>,
+    pending: &SharedPending,
+) -> Result<()> {
     emitter.emit(AdapterEvent {
         native_session: Some(json!(session_id)),
         ..AdapterEvent::new(kinds::NATIVE_SESSION_UPDATE)
@@ -88,7 +103,7 @@ fn run(
         }),
     )?;
 
-    let mut stream = SessionStream::new(&session_id);
+    let mut stream = SessionStream::new(session_id);
     for raw in events {
         let step = stream.process(&raw);
         for event in step.events {
@@ -387,6 +402,7 @@ mod tests {
         client: &ServerClient,
         session: Option<&str>,
         mode: ThreadMode,
+        ephemeral: bool,
         pending: &SharedPending,
     ) -> Vec<AdapterEvent> {
         let mut seen = Vec::new();
@@ -401,6 +417,7 @@ mod tests {
                 text: "hello",
                 session,
                 mode,
+                ephemeral,
             };
             drive_turn(client, &turn, &mut emitter, pending).unwrap();
         }
@@ -408,7 +425,42 @@ mod tests {
     }
 
     fn drive_plain(fake: &Fake, session: Option<&str>, mode: ThreadMode) -> Vec<AdapterEvent> {
-        drive(&fake.client(), session, mode, &SharedPending::default())
+        drive(
+            &fake.client(),
+            session,
+            mode,
+            false,
+            &SharedPending::default(),
+        )
+    }
+
+    #[test]
+    fn an_ephemeral_turn_deletes_its_session_afterwards() {
+        let fake = Fake::start(finish_with_a_reply);
+        drive(
+            &fake.client(),
+            None,
+            ThreadMode::Plan,
+            true,
+            &SharedPending::default(),
+        );
+        assert!(
+            fake.request(|r| r.path == format!("/session/{SESSION}"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_persistent_turn_keeps_its_session() {
+        let fake = Fake::start(finish_with_a_reply);
+        drive_plain(&fake, None, ThreadMode::Build);
+        assert!(
+            fake.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|r| r.path != format!("/session/{SESSION}"))
+        );
     }
 
     #[test]
@@ -482,7 +534,7 @@ mod tests {
                 .unwrap();
             })
         };
-        let events = drive(&client, None, ThreadMode::Build, &pending);
+        let events = drive(&client, None, ThreadMode::Build, false, &pending);
         answering.join().unwrap();
         assert!(kinds_of(&events).contains(&kinds::REQUEST));
         assert_eq!(events.last().unwrap().event, kinds::TURN_COMPLETE);
@@ -557,6 +609,7 @@ echo "opencode server listening on {}"
                 text: "hello",
                 session: None,
                 mode: ThreadMode::Build,
+                ephemeral: false,
             };
             run_turn(program.path.as_os_str(), &turn, &mut emitter, None).unwrap();
         }
@@ -587,6 +640,7 @@ echo "opencode server listening on {}"
                     text: "hello",
                     session: None,
                     mode: ThreadMode::Build,
+                    ephemeral: false,
                 };
                 run_turn(program.path.as_os_str(), &turn, &mut emitter, None).unwrap();
             }

@@ -91,6 +91,7 @@ impl HarnessAdapter for ClaudeAdapter {
             text: &request.initial_context,
             resume: None,
             mode: request.mode,
+            ephemeral: request.ephemeral,
         };
         turn_result(&turn, on_event, answers)
     }
@@ -141,6 +142,7 @@ impl HarnessAdapter for ClaudeAdapter {
             text: &request.text,
             resume: Some(session),
             mode: request.mode,
+            ephemeral: false,
         };
         turn_result(&turn, on_event, answers)?;
         Ok(())

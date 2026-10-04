@@ -14,11 +14,9 @@ export async function bundleSources(): Promise<void> {
     external: ["@opentui/core"],
     plugins: [createSolidTransformPlugin()],
   });
-  await cp(
-    join(root, "packages", "tui", "assets"),
-    join(tui, "assets"),
-    { recursive: true },
-  );
+  await cp(join(root, "packages", "tui", "assets"), join(tui, "assets"), {
+    recursive: true,
+  });
   if (!tuiBundle.success) {
     for (const log of tuiBundle.logs) console.error(log);
     process.exit(1);

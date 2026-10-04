@@ -77,6 +77,7 @@ impl HarnessAdapter for CodexAdapter {
             text: &request.initial_context,
             session: None,
             mode: request.mode,
+            ephemeral: request.ephemeral,
         };
         turn_result(&turn, on_event, answers)
     }
@@ -106,6 +107,7 @@ impl HarnessAdapter for CodexAdapter {
             text: &request.text,
             session: Some(session),
             mode: request.mode,
+            ephemeral: false,
         };
         turn_result(&turn, on_event, answers)?;
         Ok(())

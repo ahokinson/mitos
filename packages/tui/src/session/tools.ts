@@ -74,10 +74,16 @@ function kindOf(name: unknown): ToolKind {
 
 function splitArgument(text: string): Pick<ToolCall, "lines" | "hidden"> {
   const trimmed = text.trim();
-  const all = trimmed ? trimmed.split(/\r?\n/).map((line) => line.trimEnd()) : [];
-  const lines = all.slice(0, MAX_ARGUMENT_LINES).map((line) =>
-    line.length > MAX_LINE_LENGTH ? `${line.slice(0, MAX_LINE_LENGTH)}…` : line,
-  );
+  const all = trimmed
+    ? trimmed.split(/\r?\n/).map((line) => line.trimEnd())
+    : [];
+  const lines = all
+    .slice(0, MAX_ARGUMENT_LINES)
+    .map((line) =>
+      line.length > MAX_LINE_LENGTH
+        ? `${line.slice(0, MAX_LINE_LENGTH)}…`
+        : line,
+    );
   return { lines, hidden: all.length - lines.length };
 }
 
@@ -169,15 +175,17 @@ export function toolCall(event: ThreadEvent): ToolCall {
     return {
       kind,
       name: content,
-      ...splitArgument(
-        PATH_KINDS.has(kind) ? shortenPath(argument) : argument,
-      ),
+      ...splitArgument(PATH_KINDS.has(kind) ? shortenPath(argument) : argument),
     };
   }
   const kind = [payload.tool, payload.kind, payload.type]
     .map(kindOf)
     .find((candidate) => candidate !== ToolKind.Other);
-  return { kind: kind ?? ToolKind.Other, name: null, ...splitArgument(content) };
+  return {
+    kind: kind ?? ToolKind.Other,
+    name: null,
+    ...splitArgument(content),
+  };
 }
 
 /** A tool result's output as the row renders it: the head of the text and

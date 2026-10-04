@@ -10,7 +10,7 @@ mod turns;
 mod usage;
 mod views;
 
-use crate::config::handoff_max_inline_bytes;
+use crate::config::{HandoffLimits, handoff_limits};
 use crate::handoff::HandoffRenderer;
 use crate::store::Store;
 
@@ -19,7 +19,7 @@ pub use notes::ThreadNotes;
 pub struct ThreadService<'a> {
     store: &'a Store,
     renderer: &'a dyn HandoffRenderer,
-    handoff_max_inline_bytes: usize,
+    handoff_limits: HandoffLimits,
 }
 
 impl<'a> ThreadService<'a> {
@@ -27,7 +27,7 @@ impl<'a> ThreadService<'a> {
         Self {
             store,
             renderer,
-            handoff_max_inline_bytes: handoff_max_inline_bytes(store.config_root()),
+            handoff_limits: handoff_limits(store.config_root()),
         }
     }
 }

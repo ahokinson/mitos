@@ -1,4 +1,4 @@
-import { SyntaxStyle, type StyleDefinitionInput } from "@opentui/core";
+import { type StyleDefinitionInput, SyntaxStyle } from "@opentui/core";
 
 import { ColorRole, toColor } from "@theme/colors.ts";
 import { registerParsers } from "@theme/parsers.ts";
@@ -61,7 +61,10 @@ const SCOPES: Record<string, Scope> = {
 export function syntaxStyleFor(theme: Theme): SyntaxStyle {
   const styles: Record<string, StyleDefinitionInput> = {};
   for (const [name, scope] of Object.entries(SCOPES)) {
-    const fg = toColor(theme[scope.token] as string | undefined, ColorRole.Foreground);
+    const fg = toColor(
+      theme[scope.token] as string | undefined,
+      ColorRole.Foreground,
+    );
     styles[name] = { ...scope.style, ...(fg === undefined ? {} : { fg }) };
   }
   return SyntaxStyle.fromStyles(styles);

@@ -71,7 +71,8 @@ export const threadCommands: Record<string, CommandEntry> = {
 
   compact: {
     usage: "[mechanical|intelligent]",
-    summary: "Restart the selected thread in a fresh context, trimmed or summarized",
+    summary:
+      "Restart the selected thread in a fresh context, trimmed or summarized",
     run: async (args, _argLine, ctx) => {
       const thread = ctx.selected();
       if (!thread) {

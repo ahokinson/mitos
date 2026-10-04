@@ -26,6 +26,7 @@ struct FakeAdapter {
     calls: RefCell<Vec<&'static str>>,
     sent: RefCell<Vec<(Option<Value>, String)>>,
     started_with: RefCell<Vec<String>>,
+    ephemeral_starts: RefCell<Vec<(ThreadMode, String)>>,
 }
 
 impl FakeAdapter {
@@ -39,6 +40,7 @@ impl FakeAdapter {
             calls: RefCell::new(Vec::new()),
             sent: RefCell::new(Vec::new()),
             started_with: RefCell::new(Vec::new()),
+            ephemeral_starts: RefCell::new(Vec::new()),
         }
     }
 
@@ -82,6 +84,11 @@ impl HarnessAdapter for FakeAdapter {
         self.started_with
             .borrow_mut()
             .push(request.initial_context.clone());
+        if request.ephemeral {
+            self.ephemeral_starts
+                .borrow_mut()
+                .push((request.mode, request.initial_context.clone()));
+        }
         emit(&self.start_events, on_event)?;
         Ok(self.start_session.clone())
     }
@@ -533,7 +540,8 @@ fn intelligent_compact_seeds_the_fresh_session_with_the_summary() {
         .unwrap();
     let mut adapter = FakeAdapter::new();
     adapter.handoff = Some(handoff_with(&[], &json!("old")));
-    adapter.send_events = vec![
+    adapter.start_events = vec![
+        json!({"event": "native_session_update", "native_session": "summarizer"}),
         json!({"event": "assistant_message", "role": "assistant", "content": "SUMMARY TEXT"}),
         json!({"event": "turn_complete"}),
     ];
@@ -546,6 +554,24 @@ fn intelligent_compact_seeds_the_fresh_session_with_the_summary() {
     let thread = fixture.store.get_thread(&thread_id).unwrap();
     assert_eq!(thread.active_harness.as_deref(), Some("claude"));
     assert_eq!(thread.native_session, None);
+    assert!(!adapter.calls().contains(&"send_message"));
+    let summarizing = adapter.ephemeral_starts.borrow().clone();
+    assert_eq!(summarizing.len(), 1);
+    assert_eq!(summarizing[0].0, ThreadMode::Plan);
+    assert!(summarizing[0].1.contains("an early question"));
+    assert!(summarizing[0].1.contains("Summarize this conversation"));
+    assert!(
+        fixture
+            .kinds(&thread_id)
+            .iter()
+            .all(|kind| !matches!(kind, EventKind::AssistantMessage | EventKind::Status))
+    );
+    let log = fixture.store.events_since(&thread_id, 0).unwrap();
+    assert!(
+        log.iter()
+            .filter_map(|event| event.content.as_deref())
+            .all(|content| !content.contains("Summarize this conversation"))
+    );
     let compaction = fixture
         .store
         .events_since(&thread_id, 0)
@@ -573,7 +599,8 @@ fn intelligent_compact_leaves_the_binding_when_no_summary_comes_back() {
         .store
         .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
         .unwrap();
-    let adapter = FakeAdapter::new();
+    let mut adapter = FakeAdapter::new();
+    adapter.handoff = Some(handoff_with(&[], &json!("old")));
 
     let error = fixture
         .service()
@@ -584,6 +611,193 @@ fn intelligent_compact_leaves_the_binding_when_no_summary_comes_back() {
     let thread = fixture.store.get_thread(&thread_id).unwrap();
     assert_eq!(thread.native_session, Some(json!("old")));
     assert!(!fixture.kinds(&thread_id).contains(&EventKind::Compaction));
+}
+
+#[test]
+fn intelligent_compact_reports_why_the_summary_failed() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(Some("claude"));
+    fixture
+        .store
+        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
+        .unwrap();
+    let mut adapter = FakeAdapter::new();
+    adapter.handoff = Some(handoff_with(&[], &json!("old")));
+    adapter.start_events = vec![json!({"event": "error", "content": "plan limit reached"})];
+
+    let error = fixture
+        .service()
+        .compact_thread(&thread_id, CompactMode::Intelligent, &adapter)
+        .unwrap_err();
+
+    assert!(error.to_string().contains("plan limit reached"));
+    let thread = fixture.store.get_thread(&thread_id).unwrap();
+    assert_eq!(thread.native_session, Some(json!("old")));
+    assert!(!fixture.kinds(&thread_id).contains(&EventKind::Compaction));
+}
+
+#[test]
+fn the_summary_session_is_not_read_only_when_the_harness_cannot_enforce_plan_mode() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(Some("hermes"));
+    fixture
+        .store
+        .set_thread_harness(&thread_id, Some("hermes"), Some(&json!("old")))
+        .unwrap();
+    let mut adapter = FakeAdapter::new();
+    adapter.capabilities = json!({"headless": true, "modes": []});
+    adapter.handoff = Some(handoff_with(&[], &json!("old")));
+    adapter.start_events =
+        vec![json!({"event": "assistant_message", "role": "assistant", "content": "SUMMARY"})];
+
+    fixture
+        .service()
+        .compact_thread(&thread_id, CompactMode::Intelligent, &adapter)
+        .unwrap();
+
+    assert_eq!(adapter.ephemeral_starts.borrow()[0].0, ThreadMode::Build);
+}
+
+#[test]
+fn the_launch_handoff_stays_under_the_argument_limit_while_the_inline_one_does_not() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.root.join("mitos.toml"),
+        "[handoff]\nmax_inline_bytes = 1000000\n",
+    )
+    .unwrap();
+    let thread_id = fixture.thread(Some("claude"));
+    fixture
+        .store
+        .append_event(
+            &thread_id,
+            crate::domain::NewThreadEvent {
+                role: Some("user".into()),
+                content: Some("a".repeat(200_000)),
+                ..crate::domain::NewThreadEvent::new(EventKind::UserMessage)
+            },
+        )
+        .unwrap();
+    let thread = fixture.store.get_thread(&thread_id).unwrap();
+    let service = fixture.service();
+
+    let launch = service.render_launch_handoff(&thread).unwrap();
+    let inline = service.render_handoff(&thread).unwrap();
+
+    assert!(launch.len() <= 120 * 1024);
+    assert!(inline.len() > 128 * 1024);
+}
+
+#[test]
+fn tool_output_is_pruned_before_the_conversation_is_cut() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.root.join("mitos.toml"),
+        "[handoff]\nmax_inline_bytes = 2000\n",
+    )
+    .unwrap();
+    let thread_id = fixture.thread(Some("claude"));
+    for (kind, role, content) in [
+        (
+            EventKind::UserMessage,
+            Some("user"),
+            "the question".to_owned(),
+        ),
+        (EventKind::ToolResult, None, "t".repeat(5000)),
+        (
+            EventKind::AssistantMessage,
+            Some("assistant"),
+            "the answer".to_owned(),
+        ),
+    ] {
+        fixture
+            .store
+            .append_event(
+                &thread_id,
+                crate::domain::NewThreadEvent {
+                    role: role.map(Into::into),
+                    content: Some(content),
+                    ..crate::domain::NewThreadEvent::new(kind)
+                },
+            )
+            .unwrap();
+    }
+    let thread = fixture.store.get_thread(&thread_id).unwrap();
+
+    let context = fixture.service().render_handoff(&thread).unwrap();
+
+    assert!(context.len() <= 2000);
+    assert!(context.contains("- user: the question"));
+    assert!(context.contains("- assistant: the answer"));
+    assert!(!context.contains("tttt"));
+    assert!(!context.contains("Earlier Mitos handoff material omitted"));
+}
+
+fn record(fixture: &Fixture, thread_id: &str, new: crate::domain::NewThreadEvent) {
+    fixture.store.append_event(thread_id, new).unwrap();
+}
+
+#[test]
+fn the_handoff_lists_the_files_the_harness_edited_relative_to_the_workspace() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(Some("claude"));
+    record(
+        &fixture,
+        &thread_id,
+        crate::domain::NewThreadEvent {
+            content: Some("Edit".into()),
+            payload: Some(json!({
+                "type": "tool_use", "name": "Edit",
+                "input": { "file_path": "/workspace/src/lib.rs" }
+            })),
+            ..crate::domain::NewThreadEvent::new(EventKind::ToolCall)
+        },
+    );
+    let thread = fixture.store.get_thread(&thread_id).unwrap();
+
+    let context = fixture.service().render_handoff(&thread).unwrap();
+
+    assert!(context.contains("Files touched:\n- src/lib.rs\n"));
+}
+
+#[test]
+fn a_handoff_records_the_decisions_and_questions_it_carried() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(Some("claude"));
+    fixture
+        .store
+        .set_thread_harness(&thread_id, Some("claude"), Some(&json!("old")))
+        .unwrap();
+    for (kind, content) in [
+        (EventKind::Decision, "use libSQL"),
+        (EventKind::Question, "who picks the winner?"),
+    ] {
+        record(
+            &fixture,
+            &thread_id,
+            crate::domain::NewThreadEvent {
+                content: Some(content.into()),
+                ..crate::domain::NewThreadEvent::new(kind)
+            },
+        );
+    }
+    let mut adapter = FakeAdapter::new();
+    adapter.handoff = Some(handoff_with(&[], &json!("old")));
+
+    fixture
+        .service()
+        .reassign_harness(&thread_id, "codex", &adapter)
+        .unwrap();
+
+    let carryovers = fixture.store.handoff_carryovers(&thread_id).unwrap();
+    assert_eq!(carryovers.len(), 1);
+    assert_eq!(carryovers[0].decisions, ["use libSQL"]);
+    assert_eq!(carryovers[0].questions, ["who picks the winner?"]);
+    assert!(
+        carryovers[0]
+            .bounded_context
+            .contains("Decisions:\n- use libSQL")
+    );
 }
 
 #[test]

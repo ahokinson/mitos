@@ -33,5 +33,7 @@ children = [
 ]
 ```
 
+`[handoff].max_inline_bytes` caps the handoff Mitos gives a harness (default 256 KiB). When it runs over, tool output goes first, then tool calls and status lines; messages, decisions, questions and the latest summary are kept, and only if they alone still don't fit does the middle get cut. `mitos enter` passes the handoff on the harness command line, so it is held to at most 120 KiB regardless of this setting.
+
 Widget IDs are names you choose. `conversation` is the only interactive
 built-in widget kind. For hand-drawn panels, see [Template widgets](widgets.md).

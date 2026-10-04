@@ -20,6 +20,7 @@ pub struct Turn<'a> {
     pub text: &'a str,
     pub resume: Option<&'a str>,
     pub mode: ThreadMode,
+    pub ephemeral: bool,
 }
 
 type SharedStdin = Arc<Mutex<Option<ChildStdin>>>;
@@ -49,6 +50,9 @@ fn arguments(turn: &Turn<'_>) -> Vec<String> {
     .into();
     if let Some(session) = turn.resume {
         args.extend(["--resume".into(), session.into()]);
+    }
+    if turn.ephemeral {
+        args.push("--no-session-persistence".into());
     }
     args
 }
@@ -183,6 +187,7 @@ mod tests {
                 text: "hello",
                 resume: None,
                 mode: ThreadMode::Build,
+                ephemeral: false,
             };
             let outcome = run_turn(path.as_os_str(), &turn, &mut emitter, None);
             (emitter.into_native_session(), outcome)
@@ -236,6 +241,7 @@ echo '{"type":"result"}'"#,
             text: "hello",
             resume: Some("s-9"),
             mode: ThreadMode::Plan,
+            ephemeral: false,
         };
         run_turn(fake.path.as_os_str(), &turn, &mut emitter, None).unwrap();
         let received = std::fs::read_to_string(fake.dir.join("received")).unwrap();
@@ -252,6 +258,7 @@ echo '{"type":"result"}'"#,
             text: "t",
             resume: Some("abc"),
             mode: ThreadMode::Plan,
+            ephemeral: false,
         };
         let args = arguments(&turn);
         let position = args
@@ -266,5 +273,11 @@ echo '{"type":"result"}'"#,
             ..turn
         };
         assert!(arguments(&build).contains(&"bypassPermissions".to_string()));
+        assert!(!arguments(&build).contains(&"--no-session-persistence".to_string()));
+        let ephemeral = Turn {
+            ephemeral: true,
+            ..build
+        };
+        assert!(arguments(&ephemeral).contains(&"--no-session-persistence".to_string()));
     }
 }

@@ -30,6 +30,7 @@ pub struct Turn<'a> {
     pub workdir: &'a Path,
     pub text: &'a str,
     pub session: Option<&'a str>,
+    pub ephemeral: bool,
 }
 
 pub type SharedPending = Arc<Mutex<HashMap<String, PendingPermission>>>;
@@ -288,7 +289,24 @@ pub fn run_turn(
     writer.close();
     let _ = child.kill();
     let _ = child.wait();
+    if turn.ephemeral
+        && let Some(id) = string_value(emitter.native_session())
+    {
+        delete_session(program, id);
+    }
     outcome
+}
+
+/// Hermes has no ephemeral sessions, so an ephemeral turn deletes its session
+/// once the ACP process is gone. A failed delete only leaves a stray session.
+fn delete_session(program: &OsStr, id: &str) {
+    let _ = Command::new(program)
+        .args(["sessions", "delete", "--yes", id])
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 #[cfg(all(test, unix))]
@@ -420,6 +438,7 @@ mod tests {
                 workdir: Path::new("/work"),
                 text: "hello",
                 session,
+                ephemeral: false,
             };
             drive_turn(&turn, peer, &mut emitter, pending, diagnostic).unwrap();
         }
@@ -710,6 +729,7 @@ mod tests {
                 workdir: &fake.dir,
                 text: "hello",
                 session: None,
+                ephemeral: false,
             };
             run_turn(fake.path.as_os_str(), &turn, &mut emitter, None).unwrap();
         }
@@ -718,5 +738,47 @@ mod tests {
             seen[0].content.as_deref(),
             Some("hermes acp exited: ERROR provider missing")
         );
+    }
+
+    const ACP_SCRIPT: &str = r#"dir="$(dirname "$0")"
+if [ "$1" = sessions ]; then
+  printf '%s' "$*" > "$dir/deleted"
+  exit 0
+fi
+read line
+echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}}'
+read line
+echo '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s-e"}}'
+read line
+echo '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+cat >/dev/null"#;
+
+    fn run_scripted(fake: &FakeProgram, ephemeral: bool) {
+        let mut sink = |_: AdapterEvent| Ok(());
+        let mut emitter = Emitter::new(&mut sink);
+        let turn = Turn {
+            workdir: &fake.dir,
+            text: "hello",
+            session: None,
+            ephemeral,
+        };
+        run_turn(fake.path.as_os_str(), &turn, &mut emitter, None).unwrap();
+    }
+
+    #[test]
+    fn an_ephemeral_turn_deletes_its_session_through_the_cli() {
+        let fake = FakeProgram::new(ACP_SCRIPT);
+        run_scripted(&fake, true);
+        assert_eq!(
+            std::fs::read_to_string(fake.dir.join("deleted")).unwrap(),
+            "sessions delete --yes s-e"
+        );
+    }
+
+    #[test]
+    fn a_persistent_turn_keeps_its_session() {
+        let fake = FakeProgram::new(ACP_SCRIPT);
+        run_scripted(&fake, false);
+        assert!(!fake.dir.join("deleted").exists());
     }
 }

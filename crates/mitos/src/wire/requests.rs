@@ -88,6 +88,7 @@ pub struct StartThreadRequest {
     pub workdir: PathBuf,
     pub mode: ThreadMode,
     pub initial_context: String,
+    pub ephemeral: bool,
 }
 
 impl StartThreadRequest {
@@ -106,7 +107,13 @@ impl StartThreadRequest {
             workdir,
             mode,
             initial_context,
+            ephemeral: false,
         }
+    }
+
+    pub fn ephemeral(mut self) -> Self {
+        self.ephemeral = true;
+        self
     }
 }
 

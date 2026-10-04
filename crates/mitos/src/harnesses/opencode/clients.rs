@@ -45,6 +45,17 @@ impl ServerClient {
         }
     }
 
+    pub fn delete_session(&self, id: &str) -> Result<()> {
+        let path = format!("/session/{id}");
+        self.agent
+            .delete(self.url(&path))
+            .query("directory", &self.directory)
+            .header("authorization", &self.authorization)
+            .call()
+            .with_context(|| format!("opencode {path} failed"))?;
+        Ok(())
+    }
+
     pub fn post(&self, path: &str, body: &Value) -> Result<Value> {
         let mut response = self
             .agent

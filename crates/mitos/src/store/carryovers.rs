@@ -49,4 +49,27 @@ impl Store {
         )?;
         Ok(carryover)
     }
+
+    #[cfg(test)]
+    pub fn handoff_carryovers(&self, thread_id: &str) -> Result<Vec<HandoffCarryover>> {
+        self.query_all(
+            "SELECT id, thread_id, from_harness, to_harness, created_at, note, decisions_json, questions_json, bounded_context, source_event_seq_high_watermark \
+             FROM handoff_carryovers WHERE thread_id = ?1 ORDER BY created_at ASC, id ASC",
+            params![thread_id],
+            |row| {
+                Ok(HandoffCarryover {
+                    id: row.get(0)?,
+                    thread_id: row.get(1)?,
+                    from_harness: row.get(2)?,
+                    to_harness: row.get(3)?,
+                    created_at: row.get(4)?,
+                    note: row.get(5)?,
+                    decisions: serde_json::from_str(&row.get::<String>(6)?)?,
+                    questions: serde_json::from_str(&row.get::<String>(7)?)?,
+                    bounded_context: row.get(8)?,
+                    source_event_seq_high_watermark: row.get(9)?,
+                })
+            },
+        )
+    }
 }

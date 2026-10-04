@@ -53,7 +53,7 @@ impl ThreadService<'_> {
         }
         let thread = self.store.get_thread(&thread.id)?;
 
-        let context = self.render_handoff(&thread)?;
+        let context = self.render_launch_handoff(&thread)?;
         let target_native_session = (thread.active_harness.as_deref() == Some(harness))
             .then_some(thread.native_session.clone())
             .flatten();

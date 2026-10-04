@@ -5,8 +5,8 @@ use anyhow::Result;
 
 use super::ThreadService;
 use super::usage::{plan_usage_fields, usage_fields};
-use crate::domain::{EventKind, NewThreadEvent, Thread, now};
-use crate::handoff::{HandoffFacts, bounded_context};
+use crate::domain::{EventKind, NewThreadEvent, Thread, ThreadEvent, now};
+use crate::handoff::{HandoffFacts, bounded_context, files_touched};
 use crate::ports::HarnessAdapter;
 use crate::wire::requests::HandoffRequest;
 use crate::wire::responses::CollectedHandoff;
@@ -15,20 +15,38 @@ type RecordedMessages = HashMap<(&'static str, String), usize>;
 
 impl ThreadService<'_> {
     pub(super) fn render_handoff(&self, thread: &Thread) -> Result<String> {
-        let mut events = self.store.events_since(&thread.id, 0)?;
+        self.render_bounded(thread, self.handoff_limits.inline_bytes)
+    }
+
+    /// For `mitos enter`, where the handoff rides on the harness command line.
+    pub(super) fn render_launch_handoff(&self, thread: &Thread) -> Result<String> {
+        self.render_bounded(thread, self.handoff_limits.launch_bytes)
+    }
+
+    /// What the next harness needs to hear: everything from the latest
+    /// compaction on, since the summary covers what came before.
+    pub(super) fn handoff_events(&self, thread_id: &str) -> Result<Vec<ThreadEvent>> {
+        let mut events = self.store.events_since(thread_id, 0)?;
         if let Some(start) = events
             .iter()
             .rposition(|event| event.kind == EventKind::Compaction)
         {
             events.drain(..start);
         }
+        Ok(events)
+    }
+
+    fn render_bounded(&self, thread: &Thread, max_bytes: usize) -> Result<String> {
+        let events = self.handoff_events(&thread.id)?;
+        let workspace = self.store.get_workspace(&thread.workspace_id)?;
         let facts = HandoffFacts {
             thread_id: thread.id.clone(),
+            files_touched: files_touched(&events, &workspace.root),
             events,
         };
         Ok(bounded_context(
-            self.renderer.render(&facts)?,
-            self.handoff_max_inline_bytes,
+            self.renderer.render(&facts, max_bytes)?,
+            max_bytes,
         ))
     }
 
