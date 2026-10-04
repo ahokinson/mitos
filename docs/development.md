@@ -2,8 +2,24 @@
 
 ```bash
 bun run check   # formatting, TypeScript checks, Clippy, and Rust tests
+bun run coverage # TypeScript and Rust coverage; both enforce 95% thresholds
 bun run build
 ```
+
+`bun run coverage` requires `cargo-llvm-cov`. It is included by the Nix
+development shell; other environments can install it with
+`cargo install cargo-llvm-cov --locked`.
+
+## CI reporting
+
+GitHub Actions runs checks and coverage for pull requests targeting `develop`
+and pushes to that branch. Coverage reports are published to Codecov only for
+same-repository runs, so forks never receive the repository upload token.
+
+Maintainers must connect the public repository in Codecov and add its upload
+token as the `CODECOV_TOKEN` GitHub Actions secret. The separate OpenSSF
+Scorecard workflow publishes a weekly security report and uploads its SARIF
+result to GitHub Code Scanning.
 
 For source-based development:
 

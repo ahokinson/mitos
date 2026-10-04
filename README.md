@@ -6,6 +6,10 @@
 the golden thread
 </pre>
 
+[![CI](https://github.com/ahokinson/mitos/actions/workflows/ci.yml/badge.svg?branch=develop&event=push)](https://github.com/ahokinson/mitos/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/ahokinson/mitos/branch/develop/graph/badge.svg)](https://codecov.io/gh/ahokinson/mitos)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ahokinson/mitos/badge)](https://scorecard.dev/viewer/?uri=github.com/ahokinson/mitos)
+
 Mitos is a small terminal interface for carrying one coding conversation across native agent harnesses. A session belongs to the current workspace, starts as an empty draft, and is created only when you send its first message.
 
 The initial interface shows only the conversation. There is no dashboard and no required setup.
