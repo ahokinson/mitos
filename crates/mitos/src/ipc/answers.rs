@@ -163,7 +163,8 @@ mod tests {
 
     #[test]
     fn answers_reach_the_child_stdin_and_the_socket_is_removed_on_drop() {
-        let dir = std::env::temp_dir().join(format!("mitos-answers-{}", crate::domain::id()));
+        let id = crate::domain::id();
+        let dir = std::env::temp_dir().join(format!("mitos-{}", &id[..8]));
         let path = socket_path(&dir, &"thread-xyz-123".into());
         let mut child = Command::new("cat")
             .stdin(Stdio::piped())

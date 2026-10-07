@@ -3,13 +3,22 @@
   "private": true,
   "scripts": {
     "build": "bun run scripts/build.ts",
-    "check": "bun run check:ts && cargo fmt --check && bun run lint:rust && cargo test --workspace",
-    "check:ts": "biome check packages scripts && bun test --preload @opentui/solid/preload packages/tui/src",
+    "check": "bun run lint && bun run format:check",
     "coverage": "bun run coverage:ts && bun run coverage:rust",
     "coverage:rust": "cargo llvm-cov --workspace --fail-under-lines 95 --fail-under-functions 95 --lcov --output-path coverage/rust.lcov && cargo llvm-cov report",
     "coverage:ts": "bun test --preload @opentui/solid/preload --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=coverage/ts packages/tui/src",
-    "format":"biome check --write packages scripts && cargo fmt",
-    "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings -D clippy::pedantic"
+    "format": "bun run format:ts && bun run format:rust",
+    "format:check": "bun run format:check:ts && bun run format:check:rust",
+    "format:check:rust": "cargo fmt --check",
+    "format:check:ts": "biome format packages scripts",
+    "format:rust": "cargo fmt",
+    "format:ts": "biome check --write packages scripts",
+    "lint": "bun run lint:ts && bun run lint:rust",
+    "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings -D clippy::pedantic",
+    "lint:ts": "biome lint packages scripts",
+    "test": "bun run test:ts && bun run test:rust",
+    "test:rust": "cargo test --workspace",
+    "test:ts": "bun test --preload @opentui/solid/preload packages/tui/src"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
