@@ -17,7 +17,8 @@
     "tree-sitter-wasm": "1.1.1"
   },
   "overrides": {
-    "@babel/core": "7.29.6"
+    "@babel/core": "7.29.6",
+    "solid-js": "1.9.16"
   },
   "workspaces": [
     "packages/*"

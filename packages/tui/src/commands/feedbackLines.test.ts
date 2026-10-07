@@ -92,6 +92,23 @@ test("mergeFeed interleaves real events and feedback lines by timestamp", () => 
   ]);
 });
 
+test("mergeFeed returns the same item objects on every call", () => {
+  const events = [event({ seq: 1, created_at: "2026-01-01T00:00:00.000Z" })];
+  const feedbackLines = [
+    {
+      id: 1,
+      threadId: "t1",
+      tone: FeedbackTone.Info,
+      lines: ["x"],
+      createdAt: Date.parse("2026-01-01T00:00:01.000Z"),
+    },
+  ];
+  const first = mergeFeed(events, feedbackLines, "t1");
+  const second = mergeFeed(events, feedbackLines, "t1");
+  expect(second[0]).toBe(first[0]);
+  expect(second[1]).toBe(first[1]);
+});
+
 test("mergeFeed filters feedback lines down to the current thread context, including null", () => {
   const feedbackLines = [
     {

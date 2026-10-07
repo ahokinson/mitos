@@ -1,7 +1,7 @@
 import { For, Show, createMemo } from "solid-js";
 
 import type { PaneStyle } from "@layout/trees.ts";
-import { EventKind, type ThreadEvent, accumulateAssistantDeltas, isDisplayEvent } from "@session/events.ts";
+import { EventKind, type ThreadEvent } from "@session/events.ts";
 import { foldedCallIds, isQuietResult, toolUseId } from "@session/tools.ts";
 import { FeedItemKind, type FeedItem, mergeFeed } from "@commands/feedbackLines.ts";
 import { ThreadMode } from "@session/threads.ts";
@@ -27,9 +27,8 @@ export function ThreadViewWidget(props: { paneStyle?: PaneStyle; focusId: string
   const { selected, events, feedback, onSend, loadHistory, onDraftChange, registerSuggestionApplier, suggestions, suggestionCursor, working, pendingRequests, focusRing } =
     useAppState();
   const theme = useTheme();
-  const realEvents = () => accumulateAssistantDeltas(events.events().filter(isDisplayEvent));
-  const folded = createMemo(() => foldedCallIds(realEvents()));
-  const feed = (): FeedItem[] => mergeFeed(realEvents(), feedback.lines(), selected()?.id ?? null);
+  const folded = createMemo(() => foldedCallIds(events.events()));
+  const feed = createMemo((): FeedItem[] => mergeFeed(events.events(), feedback.lines(), selected()?.id ?? null));
   const isFocused = () => focusRing.current() === props.focusId;
 
   return (

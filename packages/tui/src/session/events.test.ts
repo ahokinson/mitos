@@ -3,7 +3,7 @@ import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  accumulateAssistantDeltas,
+  applyDisplayEvent,
   createThreadEventsState,
   EventKind,
   eventPresentation,
@@ -13,7 +13,8 @@ import {
   toolPreview,
 } from "@session/events.ts";
 import { Tone } from "@theme/themes.ts";
-import { createRoot, createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
+import { createStore } from "solid-js/store";
 
 function event(
   partial: Partial<ThreadEvent> & Pick<ThreadEvent, "kind">,
@@ -31,8 +32,102 @@ function event(
   };
 }
 
-test("accumulateAssistantDeltas merges consecutive deltas sharing a turn_id", () => {
-  const merged = accumulateAssistantDeltas([
+function fold(events: ThreadEvent[]): ThreadEvent[] {
+  const [rows, setRows] = createStore<ThreadEvent[]>([]);
+  for (const next of events) applyDisplayEvent(rows, setRows, next);
+  return rows;
+}
+
+test("applyDisplayEvent grows one row in place across a streaming turn", () => {
+  const [rows, setRows] = createStore<ThreadEvent[]>([]);
+  applyDisplayEvent(
+    rows,
+    setRows,
+    event({ kind: EventKind.UserMessage, seq: 1, content: "hi" }),
+  );
+  applyDisplayEvent(
+    rows,
+    setRows,
+    event({
+      kind: EventKind.AssistantDelta,
+      turn_id: "turn1",
+      seq: 2,
+      content: "a",
+    }),
+  );
+  const user = rows[0];
+  const assistant = rows[1];
+  applyDisplayEvent(
+    rows,
+    setRows,
+    event({
+      kind: EventKind.AssistantDelta,
+      turn_id: "turn1",
+      seq: 3,
+      content: "b",
+    }),
+  );
+  applyDisplayEvent(
+    rows,
+    setRows,
+    event({
+      kind: EventKind.AssistantMessage,
+      turn_id: "turn1",
+      seq: 4,
+      content: "ab!",
+    }),
+  );
+  expect(rows).toHaveLength(2);
+  expect(rows[0]).toBe(user);
+  expect(rows[1]).toBe(assistant);
+  expect(rows[1]?.content).toBe("ab!");
+});
+
+test("applyDisplayEvent notifies only the fields that changed", () => {
+  const [rows, setRows] = createStore<ThreadEvent[]>([]);
+  applyDisplayEvent(
+    rows,
+    setRows,
+    event({
+      kind: EventKind.AssistantDelta,
+      turn_id: "turn1",
+      seq: 1,
+      content: "a",
+    }),
+  );
+  const seen = { content: 0, kind: 0 };
+  const dispose = createRoot((dispose) => {
+    createEffect(() => {
+      void rows[0]?.content;
+      seen.content++;
+    });
+    createEffect(() => {
+      void rows[0]?.kind;
+      seen.kind++;
+    });
+    return dispose;
+  });
+  expect(seen).toEqual({ content: 1, kind: 1 });
+  applyDisplayEvent(
+    rows,
+    setRows,
+    event({
+      kind: EventKind.AssistantDelta,
+      turn_id: "turn1",
+      seq: 2,
+      content: "b",
+    }),
+  );
+  expect(seen).toEqual({ content: 2, kind: 1 });
+  dispose();
+});
+
+test("applyDisplayEvent drops bookkeeping events", () => {
+  expect(fold([event({ kind: EventKind.Usage })])).toHaveLength(0);
+});
+
+test("applyDisplayEventmerges consecutive deltas sharing a turn_id", () => {
+  const merged = fold([
     event({
       kind: EventKind.AssistantDelta,
       turn_id: "turn1",
@@ -57,8 +152,8 @@ test("accumulateAssistantDeltas merges consecutive deltas sharing a turn_id", ()
   expect(merged[0]?.seq).toBe(3);
 });
 
-test("accumulateAssistantDeltas replaces accumulated text with the trailing assistant_message", () => {
-  const merged = accumulateAssistantDeltas([
+test("applyDisplayEventreplaces accumulated text with the trailing assistant_message", () => {
+  const merged = fold([
     event({
       kind: EventKind.AssistantDelta,
       turn_id: "turn1",
@@ -83,8 +178,8 @@ test("accumulateAssistantDeltas replaces accumulated text with the trailing assi
   expect(merged[0]?.kind).toBe(EventKind.AssistantMessage);
 });
 
-test("accumulateAssistantDeltas keeps deltas from different turns separate", () => {
-  const merged = accumulateAssistantDeltas([
+test("applyDisplayEventkeeps deltas from different turns separate", () => {
+  const merged = fold([
     event({
       kind: EventKind.AssistantDelta,
       turn_id: "turn1",
@@ -103,8 +198,8 @@ test("accumulateAssistantDeltas keeps deltas from different turns separate", () 
   expect(merged[1]?.content).toBe("second");
 });
 
-test("accumulateAssistantDeltas never merges across a null turn_id", () => {
-  const merged = accumulateAssistantDeltas([
+test("applyDisplayEventnever merges across a null turn_id", () => {
+  const merged = fold([
     event({
       kind: EventKind.AssistantDelta,
       turn_id: null,
@@ -121,8 +216,8 @@ test("accumulateAssistantDeltas never merges across a null turn_id", () => {
   expect(merged).toHaveLength(2);
 });
 
-test("accumulateAssistantDeltas doesn't merge across an interleaved event of another kind", () => {
-  const merged = accumulateAssistantDeltas([
+test("applyDisplayEventdoesn't merge across an interleaved event of another kind", () => {
+  const merged = fold([
     event({
       kind: EventKind.AssistantDelta,
       turn_id: "turn1",
@@ -146,10 +241,10 @@ test("accumulateAssistantDeltas doesn't merge across an interleaved event of ano
   expect(merged.map((e) => e.content)).toEqual(["a", "tool", "b"]);
 });
 
-test("accumulateAssistantDeltas passes non-assistant events through unchanged", () => {
+test("applyDisplayEventpasses non-assistant events through unchanged", () => {
   const userEvent = event({ kind: EventKind.UserMessage, content: "hi" });
-  const merged = accumulateAssistantDeltas([userEvent]);
-  expect(merged[0]).toBe(userEvent);
+  const merged = fold([userEvent]);
+  expect(merged[0]).toEqual(userEvent);
 });
 
 test("displayed events use distinct semantic glyphs and tones", () => {

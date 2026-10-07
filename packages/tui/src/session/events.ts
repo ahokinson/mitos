@@ -8,7 +8,8 @@ import {
 } from "@session/requests.ts";
 import type { ToolFacts } from "@session/tools.ts";
 import { Tone } from "@theme/themes.ts";
-import { createEffect, createSignal, on } from "solid-js";
+import { batch, createEffect, on } from "solid-js";
+import { createStore, type SetStoreFunction } from "solid-js/store";
 
 export enum EventKind {
   UserMessage = "user_message",
@@ -61,17 +62,18 @@ export type EventPresentation = {
   tone: Tone;
 };
 
-/** Tracks one thread's event log, polling for events past the last seen
- * seq; resets when `threadId` changes. */
+/** Tracks one thread's display rows, polling for events past the last seen
+ * seq; resets when `threadId` changes. Rows are mutated in place so an
+ * existing row keeps its identity while its assistant text streams. */
 export function createThreadEventsState(
   threadId: () => string | null,
 ): ThreadEventsState {
-  const [events, setEvents] = createSignal<ThreadEvent[]>([]);
+  const [rows, setRows] = createStore<ThreadEvent[]>([]);
   let lastSeq = 0;
 
   createEffect(
     on(threadId, () => {
-      setEvents([]);
+      setRows([]);
       lastSeq = 0;
     }),
   );
@@ -83,10 +85,12 @@ export function createThreadEventsState(
     const last = fresh.at(-1);
     if (!last) return;
     lastSeq = last.seq;
-    setEvents((current) => [...current, ...fresh]);
+    batch(() => {
+      for (const event of fresh) applyDisplayEvent(rows, setRows, event);
+    });
   }
 
-  return { events, sync };
+  return { events: () => rows, sync };
 }
 
 /** Whether an event is worth a line in the conversation view. Usage/status
@@ -137,38 +141,40 @@ export function eventText(event: ThreadEvent): string {
   }
 }
 
-/** Collapses consecutive `assistant_delta` events of a turn into one growing
- * entry; a trailing `assistant_message` replaces the accumulated text.
- * Expects `isDisplayEvent`-filtered input. */
-export function accumulateAssistantDeltas(
-  events: readonly ThreadEvent[],
-): ThreadEvent[] {
-  const merged: ThreadEvent[] = [];
-  for (const event of events) {
-    const last = merged[merged.length - 1];
-    const isStreamingAssistant =
-      event.kind === EventKind.AssistantDelta ||
-      event.kind === EventKind.AssistantMessage;
-    const continuesRun =
-      isStreamingAssistant &&
-      last !== undefined &&
-      (last.kind === EventKind.AssistantDelta ||
-        last.kind === EventKind.AssistantMessage) &&
-      last.turn_id !== null &&
-      last.turn_id === event.turn_id;
-    if (continuesRun && last !== undefined) {
-      merged[merged.length - 1] = {
-        ...event,
-        content:
-          event.kind === EventKind.AssistantMessage
-            ? event.content
-            : `${last.content ?? ""}${event.content ?? ""}`,
-      };
-      continue;
-    }
-    merged.push(event);
+function isAssistantText(kind: EventKind): boolean {
+  return (
+    kind === EventKind.AssistantDelta || kind === EventKind.AssistantMessage
+  );
+}
+
+/** Folds one event into the rows. Consecutive `assistant_delta` events of a
+ * turn grow a single row in place; a trailing `assistant_message` replaces
+ * its text. Non-display events are dropped. */
+export function applyDisplayEvent(
+  rows: readonly ThreadEvent[],
+  setRows: SetStoreFunction<ThreadEvent[]>,
+  event: ThreadEvent,
+): void {
+  if (!isDisplayEvent(event)) return;
+  const index = rows.length - 1;
+  const last = rows[index];
+  const continuesRun =
+    last !== undefined &&
+    isAssistantText(event.kind) &&
+    isAssistantText(last.kind) &&
+    last.turn_id !== null &&
+    last.turn_id === event.turn_id;
+  if (continuesRun) {
+    setRows(index, {
+      ...event,
+      content:
+        event.kind === EventKind.AssistantMessage
+          ? event.content
+          : `${last.content ?? ""}${event.content ?? ""}`,
+    });
+    return;
   }
-  return merged;
+  setRows(rows.length, event);
 }
 
 export function eventPresentation(kind: EventKind): EventPresentation {

@@ -65,9 +65,26 @@ export type FeedItem =
   | { kind: FeedItemKind.Event; event: ThreadEvent }
   | { kind: FeedItemKind.Feedback; feedback: FeedbackLine };
 
+const eventItems = new WeakMap<ThreadEvent, FeedItem>();
+const feedbackItems = new WeakMap<FeedbackLine, FeedItem>();
+
+function cachedItem<K extends object>(
+  cache: WeakMap<K, FeedItem>,
+  key: K,
+  make: () => FeedItem,
+): FeedItem {
+  let item = cache.get(key);
+  if (!item) {
+    item = make();
+    cache.set(key, item);
+  }
+  return item;
+}
+
 /** Interleaves a thread's real events with command feedback by timestamp,
  * filtering feedback down to whichever thread context (including `null`,
- * meaning "no thread selected") is currently showing. */
+ * meaning "no thread selected") is currently showing. Items are cached per
+ * source object so a keyed list keeps rows mounted across calls. */
 export function mergeFeed(
   events: readonly ThreadEvent[],
   feedbackLines: readonly FeedbackLine[],
@@ -78,11 +95,17 @@ export function mergeFeed(
   );
   const items: { item: FeedItem; at: number }[] = [
     ...events.map((event): { item: FeedItem; at: number } => ({
-      item: { kind: FeedItemKind.Event, event },
+      item: cachedItem(eventItems, event, () => ({
+        kind: FeedItemKind.Event,
+        event,
+      })),
       at: Date.parse(event.created_at),
     })),
     ...scoped.map((feedback): { item: FeedItem; at: number } => ({
-      item: { kind: FeedItemKind.Feedback, feedback },
+      item: cachedItem(feedbackItems, feedback, () => ({
+        kind: FeedItemKind.Feedback,
+        feedback,
+      })),
       at: feedback.createdAt,
     })),
   ];
