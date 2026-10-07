@@ -75,7 +75,7 @@ let
       cp -r packages/tui/node_modules "$out/packages/tui/"
     '';
     outputHashMode = "recursive";
-    outputHash = "sha256-NWHEOb/5Mu1l6u+yTt4CjOTy/XKGxvRk42zMragC0ls=";
+    outputHash = "sha256-mWZRSTG5TRvzpUwI1RGz5/l89Z7GI6BJqi5rSbuQ6xA=";
   };
 
   # Plain `cargoLock` (not `cargoHash`) trusts the checksums already pinned
