@@ -6,7 +6,7 @@ import {
   detectInstalledHarnesses,
   type KnownHarness,
 } from "@harness/harnesses.ts";
-import { CompactMode, type Thread } from "@session/threads.ts";
+import type { Thread } from "@session/threads.ts";
 
 export function createThreadCommands(
   installedHarnesses: () => KnownHarness[] = detectInstalledHarnesses,
@@ -66,42 +66,6 @@ export function createThreadCommands(
           ctx.setCurrentHarness(requested);
           ctx.refresh();
           ctx.note(thread.id, FeedbackTone.Info, `Reassigned to ${requested}.`);
-        } catch (cause) {
-          ctx.note(thread.id, FeedbackTone.Error, describeFailure(cause));
-        }
-      },
-    },
-
-    compact: {
-      usage: "[mechanical|intelligent]",
-      summary:
-        "Restart the selected thread in a fresh context, trimmed or summarized",
-      run: async (args, _argLine, ctx) => {
-        const thread = ctx.selected();
-        if (!thread) {
-          ctx.note(
-            null,
-            FeedbackTone.Error,
-            "No thread selected. Run /new <harness> to start one, or /resume <query> to pick one up.",
-          );
-          return;
-        }
-        const requested = args[0]?.toLowerCase() ?? CompactMode.Mechanical;
-        if (
-          requested !== CompactMode.Mechanical &&
-          requested !== CompactMode.Intelligent
-        ) {
-          ctx.note(
-            thread.id,
-            FeedbackTone.Error,
-            "Usage: /compact [mechanical|intelligent]",
-          );
-          return;
-        }
-        try {
-          await ctx.mutations.compactThread(thread.id, requested);
-          ctx.refresh();
-          ctx.note(thread.id, FeedbackTone.Info, `Compacted (${requested}).`);
         } catch (cause) {
           ctx.note(thread.id, FeedbackTone.Error, describeFailure(cause));
         }

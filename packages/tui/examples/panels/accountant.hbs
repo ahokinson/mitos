@@ -1,0 +1,25 @@
+{{#color "accent"}}▍the ledger{{/color}}
+{{#color "textDim"}}────────────────────────{{/color}}
+{{#if mining.sessions}}
+sessions    {{mining.sessions}}
+messages     {{mining.messages}}  ({{mining.messages_user}} yours · {{mining.messages_assistant}} agent)
+tool calls  {{mining.tool_calls}}
+patches     {{mining.patches}} in {{mining.files_patched}} files
+forks       {{mining.forks}}
+
+{{#color "textDim"}}spent across harnesses{{/color}}
+{{#gradient "warning" "err"}}{{mining.cost}}{{/gradient}}
+tools ran for {{mining.tool_seconds}}
+
+{{#color "textDim"}}cost by day{{/color}}
+{{#each mining.days}}
+{{#color "textDim"}}·{{/color}} {{this.label}} {{usd this.value}}
+{{/each}}
+
+{{#color "textDim"}}top projects{{/color}}
+{{#each mining.projects}}
+{{#color "textDim"}}·{{/color}} {{clip this.label 13}} {{#color "textDim"}}{{usd this.value}}{{/color}}
+{{/each}}
+{{else}}
+{{#color "textDim"}}no history mined yet…{{/color}}
+{{/if}}

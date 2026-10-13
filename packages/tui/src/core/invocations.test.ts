@@ -3,7 +3,9 @@ import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { readJson, run, runJson } from "@core/invocations.ts";
+import { coreReadsRecent, readJson, run, runJson } from "@core/invocations.ts";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let dir: string;
 let savedCore: string | undefined;
@@ -75,4 +77,24 @@ test("the core program defaults to mitos on PATH", async () => {
   } finally {
     process.env.PATH = original;
   }
+});
+
+test("a core read shadows the watcher while in flight and briefly after", async () => {
+  await fakeCore("sleep 0.15; echo ok");
+  const pending = run(["slow"]);
+  await sleep(50);
+  expect(coreReadsRecent()).toBe(true);
+  const { exitCode } = await pending;
+  expect(exitCode).toBe(0);
+  expect(coreReadsRecent()).toBe(true);
+  await sleep(150);
+  expect(coreReadsRecent()).toBe(false);
+});
+
+test("readJson leaves a short shadow after it returns", async () => {
+  await fakeCore("echo '[3]'");
+  expect(readJson<number[]>([], [])).toEqual([3]);
+  expect(coreReadsRecent()).toBe(true);
+  await sleep(150);
+  expect(coreReadsRecent()).toBe(false);
 });

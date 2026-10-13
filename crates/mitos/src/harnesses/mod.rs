@@ -5,7 +5,8 @@ mod emitters;
 #[cfg(all(test, unix))]
 mod fixtures;
 mod hermes;
-mod opencode;
+pub(crate) mod mining;
+pub(crate) mod opencode;
 mod routers;
 mod turns;
 

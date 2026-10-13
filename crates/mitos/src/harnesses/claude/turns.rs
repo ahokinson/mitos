@@ -180,11 +180,58 @@ mod tests {
                 session: None,
                 mode: ThreadMode::Build,
                 ephemeral: false,
+                agent: None,
+                model: None,
             };
             let outcome = run_turn(path.as_os_str(), &turn, &mut emitter, None);
             (emitter.into_native_session(), outcome)
         };
         (seen, session, outcome)
+    }
+
+    #[test]
+    fn answer_handler_answers_known_requests_over_stdin() {
+        use serde_json::json;
+
+        use crate::domain::RequestKind;
+
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = Arc::new(Mutex::new(Some(child.stdin.take().unwrap())));
+        let pending = Arc::new(Mutex::new(HashMap::from([(
+            "req-1".to_string(),
+            PendingControl {
+                cli_request_id: "req-1".into(),
+                kind: RequestKind::Permission,
+                input: json!({ "command": "make clean" })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            },
+        )])));
+        let mut handler = answer_handler(stdin.clone(), pending);
+
+        handler(json!({ "action": "started" })).unwrap();
+        handler(json!({ "action": "answer", "request_id": "req-404" })).unwrap();
+        handler(json!({
+            "action": "answer",
+            "request_id": "req-1",
+            "response": { "allow": true }
+        }))
+        .unwrap();
+
+        drop(handler);
+        stdin.lock().unwrap().take();
+        let output = child.wait_with_output().unwrap();
+        let sent: Value =
+            serde_json::from_str(String::from_utf8(output.stdout).unwrap().trim()).unwrap();
+        assert_eq!(
+            sent["response"]["response"],
+            json!({ "behavior": "allow", "updatedInput": { "command": "make clean" } })
+        );
     }
 
     #[test]
@@ -234,6 +281,8 @@ echo '{"type":"result"}'"#,
             session: Some("s-9"),
             mode: ThreadMode::Plan,
             ephemeral: false,
+            agent: None,
+            model: None,
         };
         run_turn(fake.path.as_os_str(), &turn, &mut emitter, None).unwrap();
         let received = std::fs::read_to_string(fake.dir.join("received")).unwrap();
@@ -251,6 +300,8 @@ echo '{"type":"result"}'"#,
             session: Some("abc"),
             mode: ThreadMode::Plan,
             ephemeral: false,
+            agent: None,
+            model: None,
         };
         let args = arguments(&turn);
         let position = args

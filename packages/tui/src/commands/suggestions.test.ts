@@ -181,14 +181,14 @@ test("/hooks suggests its subcommands", () => {
 
 test("/hooks init suggests every known harness, installed or not", () => {
   const items = suggestFor("/hooks init ", ctx({ installedHarnesses: [] }));
-  expect(labels(items)).toEqual(["claude", "codex", "opencode", "hermes"]);
+  expect(labels(items)).toEqual(["opencode", "claude", "codex", "hermes"]);
   expect(labels(suggestFor("/hooks init co", ctx()))).toEqual(["codex"]);
 });
 
 test("/hooks init skips harnesses already typed and keeps them on accept", () => {
   const items = suggestFor("/hooks init codex ", ctx());
-  expect(labels(items)).toEqual(["claude", "opencode", "hermes"]);
-  expect(items[0]?.insertText).toBe("/hooks init codex claude ");
+  expect(labels(items)).toEqual(["opencode", "claude", "hermes"]);
+  expect(items[0]?.insertText).toBe("/hooks init codex opencode ");
 });
 
 test("/hooks status takes no harness arguments", () => {

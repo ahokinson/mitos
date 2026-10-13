@@ -42,6 +42,10 @@ pub struct Thread {
     pub workspace_id: WorkspaceId,
     pub status: ThreadStatus,
     pub mode: ThreadMode,
+    /// A harness agent override; `None` follows the mode's default agent.
+    pub agent: Option<String>,
+    /// A model reference, `provider/model`; `None` follows the harness default.
+    pub model: Option<String>,
     pub active_harness: Option<HarnessKind>,
     /// Opaque, adapter-owned.
     pub native_session: Option<Value>,

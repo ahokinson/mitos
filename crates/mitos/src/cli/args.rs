@@ -82,6 +82,22 @@ pub enum ViewCommand {
         #[arg(long, add = harness_candidates())]
         harness: HarnessKind,
     },
+    /// Every harness's history mined for spend, token and activity figures.
+    #[command(name = "mining")]
+    Mining {
+        /// Only this harness's history.
+        #[arg(long, add = harness_candidates())]
+        harness: Option<HarnessKind>,
+        /// Only sessions under this directory.
+        #[arg(long)]
+        directory: Option<String>,
+        /// Only sessions created within these many days.
+        #[arg(long)]
+        since_days: Option<i64>,
+        /// Entries per grouped series and the session list.
+        #[arg(long, default_value_t = crate::wire::requests::DEFAULT_TOP)]
+        top: i64,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -99,6 +115,22 @@ pub enum HooksCommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DaemonCommand {
+    /// Start the shared `OpenCode` server; does nothing when it already runs.
+    Start,
+    /// Stop the shared `OpenCode` server and remove its state.
+    Stop,
+    /// Show whether the shared `OpenCode` server is running.
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Internal: the daemon process; started by `mitos daemon start`.
+    #[command(hide = true)]
+    Run,
 }
 
 #[derive(Debug, Subcommand)]
@@ -164,6 +196,50 @@ pub enum ThreadCommand {
     Mode {
         id: ThreadId,
         mode: ThreadMode,
+    },
+    /// Ask `OpenCode` to stop the thread's running turn.
+    Abort {
+        id: ThreadId,
+    },
+    /// Fork the thread's `OpenCode` session into a new thread with the same history.
+    Fork {
+        id: ThreadId,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Publish the thread's `OpenCode` session and print its share link.
+    Share {
+        id: ThreadId,
+    },
+    /// Show the files the thread's `OpenCode` session changed.
+    Diff {
+        id: ThreadId,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set the thread's agent; `OpenCode` consumes it, others ignore it. No name clears it.
+    Agent {
+        id: ThreadId,
+        name: Option<String>,
+    },
+    /// Set the thread's model reference (`provider/model`); no reference clears it.
+    Model {
+        id: ThreadId,
+        reference: Option<String>,
+    },
+    /// List the agents the thread's `OpenCode` server offers.
+    Agents {
+        id: ThreadId,
+    },
+    /// List the model defaults the thread's `OpenCode` server offers.
+    Models {
+        id: ThreadId,
+    },
+    /// Run an `OpenCode` slash command in the thread's session.
+    Command {
+        id: ThreadId,
+        command: String,
+        arguments: Vec<String>,
     },
     /// Answer a pending harness request; the response is JSON or plain text.
     Answer {

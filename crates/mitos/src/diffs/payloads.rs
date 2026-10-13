@@ -174,6 +174,18 @@ mod tests {
     }
 
     #[test]
+    fn a_non_object_tool_result_or_a_missing_file_contributes_no_diffs() {
+        assert!(
+            payload_diffs(&json!({
+                "type": "tool_result",
+                "tool_use_result": "broken"
+            }))
+            .is_empty()
+        );
+        assert!(payload_diffs(&json!({ "type": "tool_result", "tool_use_result": {} })).is_empty());
+    }
+
+    #[test]
     fn claude_tool_result_uses_the_structured_patch_with_real_line_numbers() {
         let diffs = payload_diffs(&json!({
             "type": "tool_result",

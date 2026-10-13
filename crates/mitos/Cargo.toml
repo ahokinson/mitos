@@ -23,7 +23,7 @@ ureq = { version = "3", default-features = false }
 uuid = { version = "1.16", features = ["v4", "serde"] }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", features = ["fs", "poll"] }
+nix = { version = "0.31", features = ["fs", "poll", "signal"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }

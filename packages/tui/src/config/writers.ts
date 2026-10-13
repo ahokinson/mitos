@@ -1,5 +1,5 @@
 import type { MitosConfig } from "@config/loaders.ts";
-import { isTemplateWidget, type LayoutNode } from "@layout/trees.ts";
+import { isTemplatePanel, type LayoutNode } from "@layout/configs.ts";
 import { DEFAULT_THEME_NAME } from "@theme/palettes.ts";
 
 function quote(value: string): string {
@@ -7,8 +7,8 @@ function quote(value: string): string {
 }
 
 function inlineNode(node: LayoutNode): string {
-  if ("widget" in node)
-    return `{ widget = ${quote(node.widget)}${node.size === undefined ? "" : `, size = ${quoteOrNumber(node.size)}`} }`;
+  if ("panel" in node)
+    return `{ panel = ${quote(node.panel)}${node.size === undefined ? "" : `, size = ${quoteOrNumber(node.size)}`} }`;
   return `{ direction = ${quote(node.direction)}${node.size === undefined ? "" : `, size = ${quoteOrNumber(node.size)}`}, children = [${node.children.map(inlineNode).join(", ")}] }`;
 }
 
@@ -36,15 +36,15 @@ export function serializeConfig(config: MitosConfig): string {
     sections.push(
       `[handoff]\nmax_inline_bytes = ${config.handoff.maxInlineBytes}`,
     );
-  if (config.widgets) {
-    for (const [id, widget] of Object.entries(config.widgets)) {
-      const lines = isTemplateWidget(widget)
-        ? [`[widgets.${id}]`, `template = ${quote(widget.templatePath)}`]
-        : [`[widgets.${id}]`, `kind = ${quote(widget.kind)}`];
-      if (!isTemplateWidget(widget) && widget.focusKey)
-        lines.push(`focus_key = ${quote(widget.focusKey)}`);
-      if (isTemplateWidget(widget) && widget.align)
-        lines.push(`align = ${quote(widget.align)}`);
+  if (config.panels) {
+    for (const [id, panel] of Object.entries(config.panels)) {
+      const lines = isTemplatePanel(panel)
+        ? [`[panels.${id}]`, `template = ${quote(panel.templatePath)}`]
+        : [`[panels.${id}]`, `kind = ${quote(panel.kind)}`];
+      if (!isTemplatePanel(panel) && panel.focusKey)
+        lines.push(`focus_key = ${quote(panel.focusKey)}`);
+      if (isTemplatePanel(panel) && panel.align)
+        lines.push(`align = ${quote(panel.align)}`);
       sections.push(lines.join("\n"));
     }
   }
@@ -62,7 +62,7 @@ export function serializeConfig(config: MitosConfig): string {
 export const DEFAULT_CONFIG_TEMPLATE = `# mitos personal configuration. Safe to edit — delete this file to return to the default interface.
 
 # [session]
-# default_harness = "codex"
+# default_harness = "opencode"
 
 [theme]
 name = "${DEFAULT_THEME_NAME}"

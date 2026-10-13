@@ -16,6 +16,8 @@ CREATE TABLE threads (
     mode TEXT NOT NULL CHECK (mode IN ('plan', 'build')) DEFAULT 'build',
     active_harness TEXT,
     native_session TEXT,
+    agent TEXT,
+    model TEXT,
     last_event_seq INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -81,6 +83,8 @@ CREATE TABLE usage_snapshots (
     context_used_tokens INTEGER,
     context_limit_tokens INTEGER,
     model TEXT,
+    provider TEXT,
+    plan TEXT,
     turns INTEGER
 );
 CREATE INDEX idx_usage_snapshots_thread_time ON usage_snapshots(thread_id, observed_at);
@@ -93,6 +97,8 @@ CREATE TABLE hook_observations (
     thread_id TEXT,
     cwd TEXT,
     model TEXT,
+    provider TEXT,
+    plan TEXT,
     event TEXT,
     cost_usd REAL,
     context_used_tokens INTEGER,
@@ -102,13 +108,15 @@ CREATE TABLE hook_observations (
 );
 CREATE INDEX idx_hook_observations_thread ON hook_observations(thread_id);
 
--- Account-wide, keyed by harness alone, not by thread.
-CREATE TABLE harness_plan_usage (
-    harness TEXT PRIMARY KEY,
+-- Account-wide, keyed by the subscription plan, not by a harness or thread.
+CREATE TABLE plan_usage (
+    plan TEXT PRIMARY KEY,
     plan_five_hour_percent REAL,
     plan_five_hour_resets_at TEXT,
     plan_week_percent REAL,
     plan_week_resets_at TEXT,
+    plan_month_percent REAL,
+    plan_month_resets_at TEXT,
     observed_at TEXT NOT NULL
 );
 

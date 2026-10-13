@@ -1,0 +1,48 @@
+{{#color "accent"}}▍mid-flight · {{harness}}{{/color}}{{#if thread.status}} · {{thread.status}}{{/if}}
+{{#color "textDim"}}────────────────────────{{/color}}
+{{#if usage.harness}}
+{{#if usage.plan_5h}}
+{{#color "textDim"}}rate 5h   resets {{usage.plan_5h_resets}}{{/color}}
+{{bar usage.plan_5h 18}} {{#gradient "success" "warning" "err"}}{{usage.plan_5h}}{{/gradient}}
+{{#gte usage.plan_5h 80}}
+{{#color "err"}}window nearly spent — switch while it resets{{/color}}
+{{else}}
+{{#color "textDim"}}{{usage.plan_5h_remaining}} left in the window{{/color}}
+{{/gte}}
+
+{{#color "textDim"}}rate week  resets {{usage.plan_week_resets}}{{/color}}
+{{bar usage.plan_week 18}} {{#gradient "success" "warning" "err"}}{{usage.plan_week}}{{/gradient}}
+{{#gte usage.plan_week 80}}{{#color "err"}}week window nearly spent too{{/color}}{{/gte}}
+{{#if usage.plan_month}}
+
+{{#color "textDim"}}rate mo.   resets {{usage.plan_month_resets}}{{/color}}
+{{bar usage.plan_month 18}} {{#gradient "success" "warning" "err"}}{{usage.plan_month}}{{/gradient}}
+{{/if}}
+
+{{/if}}
+{{#if usage.context_percent}}
+{{#color "textDim"}}context{{/color}}
+{{bar usage.context_percent 18}} {{#gradient "success" "warning" "err"}}{{usage.context_percent}}{{/gradient}}
+
+{{/if}}
+{{#color "textDim"}}this thread{{/color}}
+in      {{usage.tokens_in}}
+out     {{usage.tokens_out}}
+cached  {{usage.tokens_cached}}
+{{#if usage.cost}}cost    {{usage.cost}}{{/if}}
+{{#unless usage.plan_5h}}
+{{#if estimate.5h}}
+{{#color "textDim"}}go plan · est{{/color}}
+{{bar estimate.5h 18}} {{estimate.5h}}
+{{#if estimate.5h_frees}}{{#color "textDim"}}{{estimate.5h_frees}} until it eases{{/color}}
+{{/if}}{{#color "textDim"}}week{{/color}}
+{{bar estimate.week 18}} {{estimate.week}}
+{{#color "textDim"}}month{{/color}}
+{{bar estimate.month 18}} {{estimate.month}}
+{{else}}
+{{#color "textDim"}}plan limits not reported{{/color}}
+{{/if}}
+{{/unless}}
+{{else}}
+{{#color "textDim"}}waiting for the first turn to report usage…{{/color}}
+{{/if}}

@@ -2,33 +2,36 @@ import { readFile } from "node:fs/promises";
 
 import { resolveTemplatePath } from "@config/paths.ts";
 import { warn } from "@config/tomls.ts";
-import type {
-  LayoutConfig,
-  LayoutDeclaration,
-  WidgetConfig,
-} from "@layout/trees.ts";
-import { isConversationWidget } from "@layout/trees.ts";
+import {
+  isChartPanel,
+  isConversationPanel,
+  type LayoutConfig,
+  type LayoutDeclaration,
+  type PanelConfig,
+} from "@layout/configs.ts";
 
-/** Reads each declared template once at startup. A template's configured path
- * stays in the resolved configuration so serialization never embeds source. */
+/** Reads the layout's one template file at startup; the validator has
+ * already rejected a layout that declares more than one. A template's
+ * configured path stays in the resolved configuration so serialization
+ * never embeds source. */
 export async function loadTemplateViews(
   declaration: LayoutDeclaration,
   configPath: string,
 ): Promise<LayoutConfig | null> {
-  const widgets: Record<string, WidgetConfig> = {};
-  for (const [id, widget] of Object.entries(declaration.widgets)) {
-    if (isConversationWidget(widget)) {
-      widgets[id] = widget;
+  const panels: Record<string, PanelConfig> = {};
+  for (const [id, panel] of Object.entries(declaration.panels)) {
+    if (isConversationPanel(panel) || isChartPanel(panel)) {
+      panels[id] = panel;
       continue;
     }
-    const path = resolveTemplatePath(widget.templatePath, configPath);
+    const path = resolveTemplatePath(panel.templatePath, configPath);
     try {
       const template = await readFile(path, "utf8");
       if (template.length === 0) throw new Error("file is empty");
-      widgets[id] = {
-        templatePath: widget.templatePath,
+      panels[id] = {
+        templatePath: panel.templatePath,
         template,
-        ...(widget.align && { align: widget.align }),
+        ...(panel.align && { align: panel.align }),
       };
     } catch (cause) {
       warn(
@@ -37,5 +40,5 @@ export async function loadTemplateViews(
       return null;
     }
   }
-  return { tree: declaration.tree, widgets };
+  return { tree: declaration.tree, panels };
 }

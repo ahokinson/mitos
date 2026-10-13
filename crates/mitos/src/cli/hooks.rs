@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use super::args::{HookArgs, HooksCommand};
 use super::outputs::emit;
+use crate::config::{configured_plans, plan_for};
 use crate::domain::{HarnessKind, ThreadId, Timestamp};
 use crate::hooks::{self, HookStatus, InitOutcome, InitResult, Locations, Trust};
 use crate::store::Store;
@@ -42,11 +43,20 @@ fn record(state_dir: Option<PathBuf>, args: &HookArgs, input: &[u8]) -> Result<(
         return Ok(());
     };
     let store = Store::new(state_dir)?;
+    let plan = plan_for(
+        &configured_plans(store.config_root()),
+        observation.harness,
+        observation.provider.as_deref(),
+    );
     let thread = std::env::var("MITOS_THREAD_ID")
         .ok()
         .filter(|id| !id.is_empty())
         .map(ThreadId::from);
-    store.record_observation(&observation, thread.as_ref())
+    store.record_observation(
+        &observation,
+        thread.as_ref(),
+        plan.map(crate::config::Plan::id),
+    )
 }
 
 pub fn dispatch(store: &Store, command: HooksCommand) -> Result<()> {

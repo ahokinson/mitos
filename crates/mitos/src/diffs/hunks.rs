@@ -192,6 +192,35 @@ mod tests {
         lines.join("\n")
     }
 
+    fn hunk(lines: usize) -> Hunk<'static> {
+        Hunk {
+            old_start: 1,
+            new_start: 1,
+            lines: (0..lines)
+                .map(|_| DiffLine {
+                    sign: Sign::Context,
+                    text: "x",
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn oversized_hunks_are_capped_and_count_what_was_dropped() {
+        let (kept, dropped) = cap_hunks(vec![hunk(3)], MAX_DIFF_LINES);
+        assert_eq!((kept.len(), kept[0].lines.len(), dropped), (1, 3, 0));
+
+        let (kept, dropped) = cap_hunks(vec![hunk(10), hunk(10)], 12);
+        assert_eq!(dropped, 8);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].lines.len(), 10);
+        assert_eq!(kept[1].lines.len(), 2);
+
+        let (kept, dropped) = cap_hunks(vec![hunk(10), hunk(10)], 4);
+        assert_eq!(dropped, 16);
+        assert_eq!((kept.len(), kept[0].lines.len()), (1, 4));
+    }
+
     #[test]
     fn identical_texts_have_no_diff() {
         assert_eq!(diff_texts("a.ts", "same\n", "same\n"), None);

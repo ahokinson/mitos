@@ -4,6 +4,7 @@ import { annotationCommands } from "@commands/handlers/annotations.ts";
 import { hookCommands } from "@commands/handlers/hooks.ts";
 import { modeCommands } from "@commands/handlers/modes.ts";
 import { requestCommands } from "@commands/handlers/requests.ts";
+import { sessionCommands } from "@commands/handlers/sessions.ts";
 import { threadCommands } from "@commands/handlers/threads.ts";
 
 export const COMMANDS: Record<string, CommandEntry> = {
@@ -25,6 +26,7 @@ export const COMMANDS: Record<string, CommandEntry> = {
   },
 
   ...threadCommands,
+  ...sessionCommands,
   ...annotationCommands,
   ...modeCommands,
   ...requestCommands,
