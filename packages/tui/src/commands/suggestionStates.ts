@@ -3,7 +3,6 @@ import {
   isCompleteSuggestion,
   suggestFor,
 } from "@commands/suggestions.ts";
-import { detectInstalledHarnesses } from "@harness/harnesses.ts";
 import type { Thread } from "@session/threads.ts";
 import { createEffect, createMemo, createSignal } from "solid-js";
 
@@ -19,6 +18,7 @@ export type SuggestionsState = {
 };
 
 export function createSuggestionsState(options: {
+  installedHarnesses: () => readonly string[];
   threads: () => readonly Thread[];
   pendingDeleteId: () => string | null;
 }): SuggestionsState {
@@ -27,7 +27,7 @@ export function createSuggestionsState(options: {
   const [cursorRaw, setCursorRaw] = createSignal(0);
   const all = createMemo<readonly CommandSuggestion[]>(() =>
     suggestFor(draft(), {
-      installedHarnesses: detectInstalledHarnesses(),
+      installedHarnesses: options.installedHarnesses(),
       threads: options.threads(),
       pendingDeleteId: options.pendingDeleteId(),
     }),

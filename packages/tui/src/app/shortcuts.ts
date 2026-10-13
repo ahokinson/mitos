@@ -6,8 +6,10 @@ import {
   parseKeySpec,
   type ResolvedKeyBindings,
 } from "@input/keybindings.ts";
-import { isConversationWidget, type LayoutConfig } from "@layout/trees.ts";
+import type { KeySpec } from "@input/keys.ts";
+import { isConversationPanel, type LayoutConfig } from "@layout/configs.ts";
 import { useKeyboard } from "@opentui/solid";
+import { createMemo } from "solid-js";
 
 export function useAppShortcuts(options: {
   suggestions: SuggestionsState;
@@ -19,6 +21,16 @@ export function useAppShortcuts(options: {
   quit: () => void;
 }): void {
   const { suggestions, focusRing } = options;
+
+  const focusTargets = createMemo(() => {
+    const targets: Array<{ id: string; spec: KeySpec }> = [];
+    for (const [id, panel] of Object.entries(options.layout().panels)) {
+      if (isConversationPanel(panel) && panel.focusKey) {
+        targets.push({ id, spec: parseKeySpec(panel.focusKey) });
+      }
+    }
+    return targets;
+  });
 
   useKeyboard((event) => {
     if (suggestions.suggestions().length > 0) {
@@ -57,14 +69,10 @@ export function useAppShortcuts(options: {
       run();
       return true;
     };
-    for (const [id, widget] of Object.entries(options.layout().widgets)) {
-      if (
-        isConversationWidget(widget) &&
-        widget.focusKey &&
-        matchesAction(event, [parseKeySpec(widget.focusKey)])
-      ) {
+    for (const target of focusTargets()) {
+      if (matchesAction(event, [target.spec])) {
         event.preventDefault();
-        focusRing.focus(id);
+        focusRing.focus(target.id);
         return;
       }
     }

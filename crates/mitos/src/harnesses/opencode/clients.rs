@@ -9,6 +9,7 @@ use crate::json::string_value;
 
 pub const SERVER_USER: &str = "mitos";
 
+#[derive(Clone)]
 pub struct ServerAccess {
     pub base: String,
     pub password: String,
@@ -78,6 +79,39 @@ impl ServerClient {
             return Ok(Value::Null);
         }
         Ok(serde_json::from_str(&text)?)
+    }
+
+    pub fn get(&self, path: &str) -> Result<Value> {
+        let mut response = self
+            .agent
+            .get(self.url(path))
+            .query("directory", &self.directory)
+            .header("authorization", &self.authorization)
+            .call()
+            .with_context(|| format!("opencode {path} failed"))?;
+        let status = response.status();
+        let text = response.body_mut().read_to_string()?;
+        if !status.is_success() {
+            bail!(
+                "opencode {path} failed: {} {}",
+                status.as_u16(),
+                text.trim()
+            );
+        }
+        if text.is_empty() {
+            return Ok(Value::Null);
+        }
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    /// Whether the server answers `/global/health`; a dead or stale one does not.
+    pub fn healthy(&self) -> bool {
+        self.agent
+            .get(self.url("/global/health"))
+            .query("directory", &self.directory)
+            .header("authorization", &self.authorization)
+            .call()
+            .is_ok_and(|response| response.status().is_success())
     }
 
     /// Returns once the stream is open; the events follow.

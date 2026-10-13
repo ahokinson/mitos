@@ -16,6 +16,8 @@ pub struct UsageSnapshot {
     pub context_used_tokens: Option<u64>,
     pub context_limit_tokens: Option<u64>,
     pub model: Option<String>,
+    pub provider: Option<String>,
+    pub plan: Option<String>,
     pub turns: Option<u32>,
 }
 
@@ -33,9 +35,14 @@ pub struct ThreadUsage {
     pub context_used_tokens: Option<u64>,
     pub context_limit_tokens: Option<u64>,
     pub model: Option<String>,
+    pub provider: Option<String>,
+    pub plan: Option<String>,
+    pub plan_label: Option<String>,
     pub turns: Option<u32>,
     pub plan_five_hour_percent: Option<f64>,
     pub plan_five_hour_resets_at: Option<String>,
     pub plan_week_percent: Option<f64>,
     pub plan_week_resets_at: Option<String>,
+    pub plan_month_percent: Option<f64>,
+    pub plan_month_resets_at: Option<String>,
 }

@@ -22,7 +22,7 @@ cd /path/to/workspace
 /path/to/mitos/dist/bin/mitos
 ```
 
-Mitos drives the real agent CLI (Claude Code, Codex, OpenCode, Hermes), so each harness keeps its own login and plan.
+Mitos drives the real agent CLI (OpenCode, Claude Code, Codex, Hermes), so each harness keeps its own login. A plan is a separate subscription pool: OpenCode can use several plans, and a ChatGPT plan can be used through OpenCode or Codex. OpenCode is the preferred harness when several are installed: one shared server serves every turn (`mitos daemon`), with per-thread agent, model, abort, fork, share and diff on top.
 
 ## Docs
 
@@ -31,5 +31,5 @@ Mitos drives the real agent CLI (Claude Code, Codex, OpenCode, Hermes), so each 
 - [Harnesses](docs/harnesses.md): supported CLIs and how each is driven
 - [Hooks](docs/hooks.md): account limits and context reporting
 - [Configuration](docs/configuration.md): `mitos.toml`, themes, layout
-- [Template widgets](docs/widgets.md): hand-drawn Handlebars panels
+- [Template panels](docs/panels.md): hand-drawn Handlebars panels
 - [Development](docs/development.md): checks, builds, running from source

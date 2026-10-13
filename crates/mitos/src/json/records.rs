@@ -107,6 +107,20 @@ mod tests {
     }
 
     #[test]
+    fn truthiness_follows_the_json_kind() {
+        assert!(!is_truthy(None));
+        assert!(!is_truthy(Some(&Value::Null)));
+        assert!(!is_truthy(Some(&json!(false))));
+        assert!(is_truthy(Some(&json!(true))));
+        assert!(!is_truthy(Some(&json!(0))));
+        assert!(is_truthy(Some(&json!(1))));
+        assert!(!is_truthy(Some(&json!(""))));
+        assert!(is_truthy(Some(&json!("x"))));
+        assert!(is_truthy(Some(&json!([]))));
+        assert!(is_truthy(Some(&json!({}))));
+    }
+
+    #[test]
     fn count_value_accepts_whole_and_fractional_non_negative_numbers() {
         assert_eq!(count_value(Some(&json!(7))), Some(7));
         assert_eq!(count_value(Some(&json!(7.9))), Some(7));

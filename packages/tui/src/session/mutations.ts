@@ -105,6 +105,111 @@ export async function setMode(
     throw new Error(stderr.trim() || stdout.trim() || "Could not set mode");
 }
 
+/** Ask OpenCode to stop the thread's running turn. */
+export async function abortThread(threadId: string): Promise<void> {
+  const { exitCode, stdout, stderr } = await run(["thread", "abort", threadId]);
+  if (exitCode !== 0)
+    throw new Error(stderr.trim() || stdout.trim() || "Could not abort turn");
+}
+
+/** Forks the thread's OpenCode session into a new thread. */
+export function forkThread(threadId: string): Promise<Thread> {
+  return runJson<Thread>(["thread", "fork", threadId]);
+}
+
+/** Publishes the thread's OpenCode session; returns the share URL. */
+export async function shareThread(threadId: string): Promise<string> {
+  const { exitCode, stdout, stderr } = await run(["thread", "share", threadId]);
+  if (exitCode !== 0)
+    throw new Error(stderr.trim() || stdout.trim() || "Could not share thread");
+  return stdout.trim();
+}
+
+/** The files the thread's OpenCode session changed, as summary lines. */
+export async function diffThread(threadId: string): Promise<string[]> {
+  const { exitCode, stdout, stderr } = await run(["thread", "diff", threadId]);
+  if (exitCode !== 0)
+    throw new Error(stderr.trim() || stdout.trim() || "Could not read diff");
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
+/** Sets the thread's agent; `null` returns it to the mode's default. */
+export async function setAgent(
+  threadId: string,
+  agent: string | null,
+): Promise<void> {
+  const args = ["thread", "agent", threadId];
+  if (agent) args.push(agent);
+  const { exitCode, stdout, stderr } = await run(args);
+  if (exitCode !== 0)
+    throw new Error(stderr.trim() || stdout.trim() || "Could not set agent");
+}
+
+/** Sets the thread's model reference; `null` returns it to the default. */
+export async function setModel(
+  threadId: string,
+  model: string | null,
+): Promise<void> {
+  const args = ["thread", "model", threadId];
+  if (model) args.push(model);
+  const { exitCode, stdout, stderr } = await run(args);
+  if (exitCode !== 0)
+    throw new Error(stderr.trim() || stdout.trim() || "Could not set model");
+}
+
+/** The agents the thread's OpenCode server offers, as `name: description` lines. */
+export async function listAgents(threadId: string): Promise<string[]> {
+  const { exitCode, stdout, stderr } = await run([
+    "thread",
+    "agents",
+    threadId,
+  ]);
+  if (exitCode !== 0)
+    throw new Error(stderr.trim() || stdout.trim() || "Could not list agents");
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
+/** The default model per provider, as `provider/model` lines. */
+export async function listModels(threadId: string): Promise<string[]> {
+  const { exitCode, stdout, stderr } = await run([
+    "thread",
+    "models",
+    threadId,
+  ]);
+  if (exitCode !== 0)
+    throw new Error(stderr.trim() || stdout.trim() || "Could not list models");
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
+/** Runs an OpenCode slash command in the thread's session. */
+export async function runCommand(
+  threadId: string,
+  command: string,
+  args: readonly string[],
+): Promise<string> {
+  const { exitCode, stdout, stderr } = await run([
+    "thread",
+    "command",
+    threadId,
+    command,
+    ...args,
+  ]);
+  if (exitCode !== 0)
+    throw new Error(
+      stderr.trim() || stdout.trim() || "Could not run the command",
+    );
+  return stdout.trim();
+}
+
 export async function answerRequest(
   threadId: string,
   requestId: string,

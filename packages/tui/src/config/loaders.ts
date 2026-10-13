@@ -15,11 +15,8 @@ import {
 } from "@config/validators.ts";
 import { DEFAULT_CONFIG_TEMPLATE } from "@config/writers.ts";
 import type { KeybindingsConfig } from "@input/keybindings.ts";
-import {
-  DEFAULT_LAYOUT_CONFIG,
-  type LayoutConfig,
-  validateLayoutConfig,
-} from "@layout/trees.ts";
+import { DEFAULT_LAYOUT_CONFIG, type LayoutConfig } from "@layout/configs.ts";
+import { validateLayoutConfig } from "@layout/validators.ts";
 import { BUILTIN_THEME_NAMES } from "@theme/palettes.ts";
 import type { Theme, ThemeConfig, ThemePathsConfig } from "@theme/themes.ts";
 import { createSignal } from "solid-js";
@@ -29,7 +26,7 @@ export type MitosConfig = {
   themes?: ThemePathsConfig;
   session?: SessionConfig;
   handoff?: HandoffConfig;
-  widgets?: LayoutConfig["widgets"];
+  panels?: LayoutConfig["panels"];
   layout?: LayoutConfig;
   keybindings?: KeybindingsConfig;
 };
@@ -85,15 +82,15 @@ export async function loadConfig(overrideDir?: string): Promise<ConfigHandle> {
     theme.name = undefined;
   }
   const layoutDeclaration =
-    raw.layout === undefined && raw.widgets === undefined
+    raw.layout === undefined && raw.panels === undefined
       ? DEFAULT_LAYOUT_CONFIG
-      : validateLayoutConfig(raw.widgets, raw.layout);
+      : validateLayoutConfig(raw.panels, raw.layout);
   const resolvedLayout = layoutDeclaration
     ? await loadTemplateViews(layoutDeclaration, configPath)
     : null;
   if (!resolvedLayout)
     warn(
-      "[widgets] and [layout] must form a valid named layout — using default",
+      "[panels] and [layout] must form a valid named layout — using default",
     );
 
   const [config, setConfig] = createSignal<MitosConfig>({
@@ -101,7 +98,7 @@ export async function loadConfig(overrideDir?: string): Promise<ConfigHandle> {
     themes,
     session: validateSession(raw.session),
     handoff: validateHandoff(raw.handoff),
-    widgets: (resolvedLayout ?? DEFAULT_LAYOUT_CONFIG).widgets,
+    panels: (resolvedLayout ?? DEFAULT_LAYOUT_CONFIG).panels,
     layout: resolvedLayout ?? DEFAULT_LAYOUT_CONFIG,
     keybindings: validateKeybindings(raw.keybindings),
   });

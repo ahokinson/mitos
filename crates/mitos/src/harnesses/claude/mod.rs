@@ -1,4 +1,5 @@
 mod controls;
+mod mining;
 mod streams;
 mod turns;
 
@@ -15,8 +16,8 @@ use crate::harnesses::{Emitter, Harness, Turn};
 use crate::history::{JsonlSearch, collect_jsonl_handoff, collect_requested_handoff, harness_home};
 use crate::ports::EventSink;
 use crate::wire::events::{AdapterEvent, kinds};
-use crate::wire::requests::{AttachThreadRequest, HandoffRequest};
-use crate::wire::responses::{Capabilities, CollectedHandoff};
+use crate::wire::requests::{AttachThreadRequest, HandoffRequest, MiningRequest};
+use crate::wire::responses::{Capabilities, CollectedHandoff, MiningReport};
 
 const ASSISTANT: &str = "assistant";
 
@@ -68,6 +69,10 @@ impl Harness for ClaudeAdapter {
 
     fn collect(&self, request: &HandoffRequest) -> Result<CollectedHandoff> {
         collect_requested_handoff(&projects_root(), request)
+    }
+
+    fn mine(&self, request: &MiningRequest) -> MiningReport {
+        mining::mine_claude(&projects_root(), request)
     }
 
     fn attach(&self, request: &AttachThreadRequest, on_event: &mut EventSink<'_>) -> Result<()> {

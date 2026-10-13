@@ -22,6 +22,10 @@ export type Thread = {
   workspace_id: string;
   status: ThreadStatus;
   mode: ThreadMode;
+  /** A harness agent override; OpenCode consumes it, others ignore it. */
+  agent: string | null;
+  /** A model reference, `provider/model`; OpenCode consumes it, others ignore it. */
+  model: string | null;
   active_harness: string | null;
   native_session: unknown | null;
   last_event_seq: number;
@@ -69,6 +73,8 @@ function sameThreads(
         thread.workspace_id === candidate.workspace_id &&
         thread.status === candidate.status &&
         thread.mode === candidate.mode &&
+        thread.agent === candidate.agent &&
+        thread.model === candidate.model &&
         thread.active_harness === candidate.active_harness &&
         thread.last_event_seq === candidate.last_event_seq &&
         thread.created_at === candidate.created_at &&

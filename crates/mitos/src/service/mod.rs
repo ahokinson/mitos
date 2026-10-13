@@ -10,17 +10,19 @@ mod turns;
 mod usage;
 mod views;
 
-use crate::config::{HandoffLimits, handoff_limits};
+use crate::config::{HandoffLimits, Plan, configured_plans, handoff_limits};
 use crate::handoff::HandoffRenderer;
 use crate::store::Store;
 
 pub use notes::ThreadNotes;
+pub use threads::NativeTarget;
 pub use views::EventView;
 
 pub struct ThreadService<'a> {
     store: &'a Store,
     renderer: &'a dyn HandoffRenderer,
     handoff_limits: HandoffLimits,
+    plans: Vec<Plan>,
 }
 
 impl<'a> ThreadService<'a> {
@@ -29,6 +31,7 @@ impl<'a> ThreadService<'a> {
             store,
             renderer,
             handoff_limits: handoff_limits(store.config_root()),
+            plans: configured_plans(store.config_root()),
         }
     }
 }

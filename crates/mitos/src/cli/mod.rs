@@ -1,4 +1,5 @@
 mod args;
+mod daemons;
 mod hooks;
 mod launchers;
 mod outputs;
@@ -52,6 +53,11 @@ enum Command {
         #[command(subcommand)]
         command: args::HooksCommand,
     },
+    /// Manage the shared `OpenCode` server that turns connect to.
+    Daemon {
+        #[command(subcommand)]
+        command: args::DaemonCommand,
+    },
 }
 
 /// # Errors
@@ -59,9 +65,20 @@ enum Command {
 pub fn run() -> Result<()> {
     CompleteEnv::with_factory(Cli::command).complete();
     let cli = Cli::parse();
+    if let Some(state_dir) = &cli.state_dir {
+        // Keep every later reader — the store, the daemon, spawned children —
+        // on one state root, flag or environment alike.
+        //
+        // SAFETY: no other thread exists yet.
+        unsafe { std::env::set_var("MITOS_STATE_DIR", state_dir) };
+    }
     // A hook runs inside a harness and must not open the database up front.
     if let Some(Command::Hook(args)) = &cli.command {
-        return hooks::collect(cli.state_dir, args);
+        return hooks::collect(cli.state_dir.clone(), args);
+    }
+    // The daemon owns files and processes only; it must not open the database.
+    if let Some(Command::Daemon { command }) = &cli.command {
+        return daemons::dispatch(command);
     }
     let tui_state_dir = cli.state_dir.clone();
     let store = Store::new(cli.state_dir)?;
@@ -74,6 +91,8 @@ pub fn run() -> Result<()> {
         Some(Command::Thread { command }) => threads::dispatch(&service, &adapter, command),
         Some(Command::View { command }) => views::dispatch(&service, command),
         Some(Command::Hooks { command }) => hooks::dispatch(&store, command),
-        Some(Command::Hook(_)) => unreachable!("handled before the store opens"),
+        Some(Command::Hook(_) | Command::Daemon { .. }) => {
+            unreachable!("handled before the store opens")
+        }
     }
 }

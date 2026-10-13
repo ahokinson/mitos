@@ -79,3 +79,26 @@ impl Store {
         locks::lock_file(&self.root.join("locks").join(format!("thread-{id}.lock")))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locking_a_thread_creates_and_releases_its_lock_file() {
+        let (store, root) = fixtures::test_store();
+        let thread = fixtures::test_thread(&store, "locking");
+        {
+            let _lock = store.lock_thread(&thread.id).unwrap();
+            assert!(
+                root.join("locks")
+                    .join(format!("thread-{}.lock", thread.id))
+                    .exists()
+            );
+        }
+        let again = store.lock_thread(&thread.id).unwrap();
+        drop(again);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

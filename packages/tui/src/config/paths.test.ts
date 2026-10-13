@@ -53,8 +53,8 @@ test("theme paths resolve like template paths", () => {
 });
 
 test("template paths resolve relative to mitos.toml", () => {
-  expect(resolveTemplatePath("widgets/usage.hbs", configPath)).toBe(
-    "/tmp/mitos-config/widgets/usage.hbs",
+  expect(resolveTemplatePath("panels/usage.hbs", configPath)).toBe(
+    "/tmp/mitos-config/panels/usage.hbs",
   );
 });
 
@@ -62,7 +62,7 @@ test("template paths preserve absolute paths and expand home", () => {
   expect(resolveTemplatePath("/var/tmp/usage.hbs", configPath)).toBe(
     "/var/tmp/usage.hbs",
   );
-  expect(resolveTemplatePath("~/widgets/usage.hbs", configPath)).toBe(
-    join(homedir(), "widgets/usage.hbs"),
+  expect(resolveTemplatePath("~/panels/usage.hbs", configPath)).toBe(
+    join(homedir(), "panels/usage.hbs"),
   );
 });

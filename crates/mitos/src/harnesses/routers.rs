@@ -7,10 +7,10 @@ use super::{ClaudeAdapter, CodexAdapter, HermesAdapter, OpenCodeAdapter};
 use crate::domain::HarnessKind;
 use crate::ports::{EventSink, HarnessAdapter};
 use crate::wire::requests::{
-    AdapterRequest, AttachThreadRequest, DetachThreadRequest, HandoffRequest, SendMessageRequest,
-    StartThreadRequest,
+    AdapterRequest, AttachThreadRequest, DetachThreadRequest, HandoffRequest, MiningRequest,
+    SendMessageRequest, StartThreadRequest,
 };
-use crate::wire::responses::{Capabilities, CollectedHandoff, LaunchPlan};
+use crate::wire::responses::{Capabilities, CollectedHandoff, LaunchPlan, MiningReport};
 
 pub struct Adapters;
 
@@ -22,6 +22,22 @@ impl Adapters {
             HarnessKind::Hermes => &HermesAdapter,
             HarnessKind::OpenCode => &OpenCodeAdapter,
         }
+    }
+
+    /// One harness's mined history.
+    pub fn mine_one(harness: HarnessKind, request: &MiningRequest) -> MiningReport {
+        Self::route(harness).mine_history(request)
+    }
+
+    /// Every harness's mined history, folded into one report; a harness
+    /// without a minable history contributes nothing.
+    pub fn mine_all(request: &MiningRequest) -> MiningReport {
+        HarnessKind::ALL
+            .into_iter()
+            .map(|harness| Self::route(harness).mine_history(request))
+            .fold(MiningReport::default(), |merged, report| {
+                merged.merged(report)
+            })
     }
 }
 
@@ -67,6 +83,10 @@ impl HarnessAdapter for Adapters {
     fn detach_thread(&self, request: &DetachThreadRequest) -> Result<()> {
         Self::route(request.harness).detach_thread(request)
     }
+
+    fn mine_history(&self, request: &MiningRequest) -> MiningReport {
+        Self::mine_all(request)
+    }
 }
 
 #[cfg(test)]
@@ -79,5 +99,14 @@ mod tests {
             assert!(Adapters.negotiate(harness).unwrap().headless);
         }
         assert!(!Adapters.negotiate(HarnessKind::Claude).unwrap().ask_back);
+    }
+
+    #[test]
+    fn a_harness_without_minable_history_reports_nothing() {
+        let request = crate::wire::requests::MiningRequest::new(None, None, 10);
+        assert_eq!(
+            Adapters::mine_one(HarnessKind::Hermes, &request),
+            MiningReport::default()
+        );
     }
 }

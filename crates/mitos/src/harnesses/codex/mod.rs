@@ -1,3 +1,4 @@
+mod mining;
 mod requests;
 mod streams;
 mod tokens;
@@ -12,8 +13,8 @@ use self::turns::run_turn;
 use crate::domain::ThreadMode;
 use crate::harnesses::{Emitter, Harness, Turn};
 use crate::history::{collect_requested_handoff, harness_home};
-use crate::wire::requests::HandoffRequest;
-use crate::wire::responses::{Capabilities, CollectedHandoff};
+use crate::wire::requests::{HandoffRequest, MiningRequest};
+use crate::wire::responses::{Capabilities, CollectedHandoff, MiningReport};
 
 pub struct CodexAdapter;
 
@@ -50,6 +51,10 @@ impl Harness for CodexAdapter {
 
     fn collect(&self, request: &HandoffRequest) -> Result<CollectedHandoff> {
         collect_requested_handoff(&sessions_root(), request)
+    }
+
+    fn mine(&self, request: &MiningRequest) -> MiningReport {
+        mining::mine_codex(&sessions_root(), request)
     }
 }
 
