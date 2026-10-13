@@ -15,12 +15,17 @@ fn harness_names() -> Vec<&'static str> {
 }
 
 pub fn status(locations: &Locations) -> Vec<HookStatus> {
-    vec![
-        claude::status(&locations.claude_settings),
-        codex::status(&locations.codex_hooks, &locations.codex_config),
-        hermes::status(&locations.hermes_config, &locations.hermes_allowlist),
-        opencode::status(&locations.opencode_plugin),
-    ]
+    HarnessKind::ALL
+        .into_iter()
+        .map(|harness| match harness {
+            HarnessKind::Claude => claude::status(&locations.claude_settings),
+            HarnessKind::Codex => codex::status(&locations.codex_hooks, &locations.codex_config),
+            HarnessKind::Hermes => {
+                hermes::status(&locations.hermes_config, &locations.hermes_allowlist)
+            }
+            HarnessKind::OpenCode => opencode::status(&locations.opencode_plugin),
+        })
+        .collect()
 }
 
 /// `only` empty means every harness; an unknown name is reported, not ignored.

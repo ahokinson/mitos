@@ -53,6 +53,16 @@ impl ThreadService<'_> {
         thread_id: &ThreadId,
         harness: HarnessKind,
     ) -> Result<Option<ThreadUsage>> {
-        self.store.latest_usage(thread_id, harness)
+        let mut usage = self.store.latest_usage(thread_id, harness)?;
+        if let Some(reading) = &mut usage
+            && let Some(plan) = reading.plan.as_deref()
+        {
+            reading.plan_label = self
+                .plans
+                .iter()
+                .find(|candidate| candidate.id() == plan)
+                .map(|plan| plan.label().into());
+        }
+        Ok(usage)
     }
 }

@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use serde_json::Value;
 
 use super::ThreadService;
 use super::bindings::ensure_supported;
@@ -16,7 +17,59 @@ use crate::wire::requests::{DetachThreadRequest, StartThreadRequest};
 
 const SUMMARIZE_PROMPT: &str = "Summarize this conversation so it can continue in a fresh context. Cover the goal, decisions made, work completed, files touched, open questions and next steps. Reply with the summary only.";
 
+/// A thread's harness, native session and workspace, for operations the
+/// harness itself must perform.
+pub struct NativeTarget {
+    pub harness: HarnessKind,
+    pub session: String,
+    pub workdir: PathBuf,
+    pub agent: Option<String>,
+    pub model: Option<String>,
+}
+
 impl ThreadService<'_> {
+    pub fn native_target(&self, thread_id: &ThreadId) -> Result<NativeTarget> {
+        let thread = self.store.get_thread(thread_id)?;
+        let harness = thread
+            .active_harness
+            .context("thread has no harness assigned")?;
+        let session = crate::json::string_value(thread.native_session.as_ref())
+            .context("thread has no native session yet; send a message first")?
+            .to_string();
+        let workspace = self.store.get_workspace(&thread.workspace_id)?;
+        Ok(NativeTarget {
+            harness,
+            session,
+            workdir: workspace.root.into(),
+            agent: thread.agent,
+            model: thread.model,
+        })
+    }
+
+    /// Creates a thread in `source`'s workspace, bound to a native session
+    /// that already exists, with the source's mode, agent and model.
+    pub fn new_bound_thread(
+        &self,
+        source: &ThreadId,
+        harness: HarnessKind,
+        native_session: &Value,
+    ) -> Result<Thread> {
+        let source = self.store.get_thread(source)?;
+        let workspace = self.store.get_workspace(&source.workspace_id)?;
+        let thread = self.store.create_thread(&workspace.id)?;
+        if thread.mode != source.mode {
+            self.set_mode(&thread.id, source.mode)?;
+        }
+        if let Some(agent) = source.agent.as_deref() {
+            self.set_agent(&thread.id, Some(agent))?;
+        }
+        if let Some(model) = source.model.as_deref() {
+            self.set_model(&thread.id, Some(model))?;
+        }
+        self.bind_harness(&thread.id, harness, Some(native_session))?;
+        self.store.get_thread(&thread.id)
+    }
+
     pub fn new_thread(
         &self,
         harness: Option<HarnessKind>,
@@ -50,6 +103,26 @@ impl ThreadService<'_> {
             return Ok(());
         }
         self.store.set_thread_mode(thread_id, mode)
+    }
+
+    /// Sets the thread's harness agent override; `None` returns it to the
+    /// mode's default agent.
+    pub fn set_agent(&self, thread_id: &ThreadId, agent: Option<&str>) -> Result<()> {
+        let thread = self.store.get_thread(thread_id)?;
+        if thread.agent.as_deref() == agent {
+            return Ok(());
+        }
+        self.store.set_thread_agent(thread_id, agent)
+    }
+
+    /// Sets the thread's model reference, `provider/model`; `None` returns it
+    /// to the harness default.
+    pub fn set_model(&self, thread_id: &ThreadId, model: Option<&str>) -> Result<()> {
+        let thread = self.store.get_thread(thread_id)?;
+        if thread.model.as_deref() == model {
+            return Ok(());
+        }
+        self.store.set_thread_model(thread_id, model)
     }
 
     pub fn archive<A: HarnessAdapter>(&self, thread_id: &ThreadId, adapter: &A) -> Result<()> {

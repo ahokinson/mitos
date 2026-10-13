@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,10 @@ import {
   latestUsage,
   listThreads,
   listUserMessages,
+  mineAll,
   pendingRequests,
+  resolveHistoryWatchRoots,
+  resolveMiningWatchPaths,
   syncEvents,
 } from "@database/views.ts";
 import { EventKind } from "@session/events.ts";
@@ -133,6 +137,8 @@ test("usage is the core's figures for the thread under a harness", async () => {
     plan_five_hour_resets_at: null,
     plan_week_percent: null,
     plan_week_resets_at: null,
+    plan_month_percent: null,
+    plan_month_resets_at: null,
   };
   await fakeCore(JSON.stringify(usage));
   expect(latestUsage("a", "codex")).toEqual(usage);
@@ -173,4 +179,73 @@ test("a core that cannot be started reads as nothing", () => {
   expect(isThreadEmpty("a")).toBe(false);
   expect(listThreads("workspace-a")).toEqual([]);
   expect(latestUsage("a", "codex")).toBeNull();
+});
+
+test("mineAll reads the merged mining view and falls back to null", async () => {
+  await fakeCore(
+    JSON.stringify({
+      totals: {
+        sessions: 1,
+        messages: 2,
+        tool_calls: 3,
+        patches: 0,
+        cost_usd: 1.5,
+        tokens_input: 10,
+        tokens_output: 5,
+        tokens_cache_read: 100,
+      },
+      cost_by_day: [],
+      cost_by_project: [{ label: "/w", value: 1.5 }],
+      cost_by_model: [],
+      tokens_by_day: [],
+      tool_usage: [],
+      activity_by_day: [],
+      sessions: [],
+    }),
+  );
+  const report = mineAll();
+  expect(report?.totals.sessions).toBe(1);
+  expect(report?.cost_by_project).toEqual([{ label: "/w", value: 1.5 }]);
+  expect(await calls()).toEqual(["view mining --top 100"]);
+
+  await fakeCore("not json");
+  expect(mineAll()).toBeNull();
+});
+
+test("resolveMiningWatchPaths finds the opencode history and skips without one", () => {
+  const previous = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    expect(resolveMiningWatchPaths()).toEqual([]);
+    const opencode = join(dir, "opencode");
+    mkdirSync(opencode);
+    writeFileSync(join(opencode, "opencode-stable.db"), "");
+    expect(resolveMiningWatchPaths()).toEqual([
+      join(opencode, "opencode-stable.db"),
+    ]);
+  } finally {
+    if (previous === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previous;
+  }
+});
+
+test("resolveHistoryWatchRoots names claude and codex only when they exist", () => {
+  const previousClaude = process.env.CLAUDE_CONFIG_DIR;
+  const previousCodex = process.env.CODEX_HOME;
+  process.env.CLAUDE_CONFIG_DIR = join(dir, "claude-home");
+  process.env.CODEX_HOME = join(dir, "codex-home");
+  try {
+    expect(resolveHistoryWatchRoots()).toEqual([]);
+    mkdirSync(join(dir, "claude-home", "projects"), { recursive: true });
+    mkdirSync(join(dir, "codex-home", "sessions"), { recursive: true });
+    expect(resolveHistoryWatchRoots()).toEqual([
+      join(dir, "claude-home", "projects"),
+      join(dir, "codex-home", "sessions"),
+    ]);
+  } finally {
+    if (previousClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previousClaude;
+    if (previousCodex === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodex;
+  }
 });

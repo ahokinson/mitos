@@ -1,12 +1,13 @@
 import { expect, test } from "bun:test";
 import { createSuggestionsState } from "@commands/suggestionStates.ts";
-import { createRoot } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 
 function withState<R>(
   run: (state: ReturnType<typeof createSuggestionsState>) => Promise<R> | R,
 ): Promise<R> {
   return createRoot(async (dispose) => {
     const state = createSuggestionsState({
+      installedHarnesses: () => ["claude", "codex"],
       threads: () => [],
       pendingDeleteId: () => null,
     });
@@ -18,6 +19,29 @@ function withState<R>(
     }
   });
 }
+
+test("harness suggestions follow the installed set as it changes", () =>
+  createRoot((dispose) => {
+    const [installed, setInstalled] = createSignal<readonly string[]>([
+      "claude",
+    ]);
+    const state = createSuggestionsState({
+      installedHarnesses: installed,
+      threads: () => [],
+      pendingDeleteId: () => null,
+    });
+    try {
+      state.setDraft("/new ");
+      expect(state.suggestions().map((item) => item.label)).toEqual(["claude"]);
+      setInstalled(["claude", "codex"]);
+      expect(state.suggestions().map((item) => item.label)).toEqual([
+        "claude",
+        "codex",
+      ]);
+    } finally {
+      dispose();
+    }
+  }));
 
 test("plain text offers no suggestions", () =>
   withState((state) => {

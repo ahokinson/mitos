@@ -8,7 +8,7 @@ string_enum! {
 }
 
 impl HarnessKind {
-    pub const ALL: [Self; 4] = [Self::Claude, Self::Codex, Self::Hermes, Self::OpenCode];
+    pub const ALL: [Self; 4] = [Self::OpenCode, Self::Claude, Self::Codex, Self::Hermes];
 }
 
 #[cfg(test)]

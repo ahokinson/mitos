@@ -1,5 +1,9 @@
 mod clients;
+pub(crate) mod control;
+pub(crate) mod daemon;
 mod handoffs;
+pub(crate) mod mining;
+mod servers;
 mod streams;
 mod turns;
 
@@ -12,8 +16,8 @@ use self::handoffs::collect_opencode_handoff;
 use self::turns::run_turn;
 use crate::domain::ThreadMode;
 use crate::harnesses::{Emitter, Harness, Turn};
-use crate::wire::requests::HandoffRequest;
-use crate::wire::responses::{Capabilities, CollectedHandoff};
+use crate::wire::requests::{HandoffRequest, MiningRequest};
+use crate::wire::responses::{Capabilities, CollectedHandoff, MiningReport};
 
 pub struct OpenCodeAdapter;
 
@@ -62,6 +66,10 @@ impl Harness for OpenCodeAdapter {
 
     fn collect(&self, request: &HandoffRequest) -> Result<CollectedHandoff> {
         Ok(collect_opencode_handoff(&data_home(), request))
+    }
+
+    fn mine(&self, request: &MiningRequest) -> MiningReport {
+        mining::mine_opencode(&data_home(), request)
     }
 }
 

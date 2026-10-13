@@ -125,6 +125,9 @@ fn opencode(payload: &Value) -> Observation {
             .or_else(|| in_info(&["model"]))
             .and_then(Value::as_str)
             .map(str::to_owned),
+        provider: in_info(&["model", "providerID"])
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         cost_usd: in_info(&["cost"]).and_then(Value::as_f64),
         ..Observation::new(HarnessKind::OpenCode)
     }

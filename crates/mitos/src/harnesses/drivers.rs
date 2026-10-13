@@ -9,10 +9,10 @@ use crate::json::string_value;
 use crate::ports::{EventSink, HarnessAdapter};
 use crate::wire::events::{AdapterEvent, kinds};
 use crate::wire::requests::{
-    AdapterRequest, AttachThreadRequest, DetachThreadRequest, HandoffRequest, SendMessageRequest,
-    StartThreadRequest,
+    AdapterRequest, AttachThreadRequest, DetachThreadRequest, HandoffRequest, MiningRequest,
+    SendMessageRequest, StartThreadRequest,
 };
-use crate::wire::responses::{Capabilities, CollectedHandoff, LaunchPlan};
+use crate::wire::responses::{Capabilities, CollectedHandoff, LaunchPlan, MiningReport};
 
 /// What differs between native harnesses; `HarnessAdapter` is derived from it.
 pub trait Harness {
@@ -31,6 +31,12 @@ pub trait Harness {
     ) -> Result<()>;
 
     fn collect(&self, request: &HandoffRequest) -> Result<CollectedHandoff>;
+
+    /// Harnesses with a stored history miners can read override this; the
+    /// default reports none.
+    fn mine(&self, _request: &MiningRequest) -> MiningReport {
+        MiningReport::default()
+    }
 
     /// Harnesses that can replay their history override this.
     fn attach(&self, _request: &AttachThreadRequest, on_event: &mut EventSink<'_>) -> Result<()> {
@@ -59,6 +65,10 @@ impl<H: Harness> HarnessAdapter for H {
         self.collect(request)
     }
 
+    fn mine_history(&self, request: &MiningRequest) -> MiningReport {
+        self.mine(request)
+    }
+
     fn start_thread(
         &self,
         request: &StartThreadRequest,
@@ -71,6 +81,8 @@ impl<H: Harness> HarnessAdapter for H {
             session: None,
             mode: request.mode,
             ephemeral: request.ephemeral,
+            agent: request.agent.as_deref(),
+            model: request.model.as_deref(),
         };
         Emitter::collect(on_event, |emitter| self.run_turn(&turn, emitter, answers))
     }
@@ -98,6 +110,8 @@ impl<H: Harness> HarnessAdapter for H {
             session: Some(session),
             mode: request.mode,
             ephemeral: false,
+            agent: request.agent.as_deref(),
+            model: request.model.as_deref(),
         };
         Emitter::collect(on_event, |emitter| self.run_turn(&turn, emitter, answers))?;
         Ok(())

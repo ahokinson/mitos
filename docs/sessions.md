@@ -1,6 +1,8 @@
 # Sessions and handoffs
 
-`Ctrl+N` opens a new draft. `/threads` lists the workspace's sessions and `/resume` switches to one. If `[session].default_harness` is set, the first message starts that harness; otherwise Mitos asks which installed harness to use. `/harness` reassigns the selected session's harness.
+`Ctrl+N` opens a new draft. `/threads` lists the workspace's sessions and `/resume` switches to one. If `[session].default_harness` is set, the first message starts that harness; otherwise the first installed harness starts it, and OpenCode is preferred when several are installed. `/harness` reassigns the selected session's harness.
+
+`/mode` sets the thread's mode (plan or build), which stays the safety boundary. `/agent <name>` and `/model <provider/model>` set per-thread OpenCode preferences on top of the mode; bare `/agent` and bare `/model` list what the server offers. `/abort` stops the selected OpenCode thread's running turn, `/fork` copies its session into a new thread, `/diff` shows the files its session changed, and `/oc <command>` runs an OpenCode slash command in it. See [Harnesses](harnesses.md).
 
 A Mitos session remains one session when its harness changes. Switching harnesses starts a fresh native target and supplies the target with the collected session evidence. Mitos mines evidence while turns stream, after an interactive harness exits, and immediately before a switch. It does not run a background collector.
 

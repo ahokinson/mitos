@@ -80,13 +80,15 @@ impl ThreadService<'_> {
         let thread_id = &turn.thread.id;
         let workspace = self.store.get_workspace(&turn.thread.workspace_id)?;
         let text = self.store.user_message_for_turn(thread_id, turn.id)?;
-        let request = SendMessageRequest::new(
+        let mut request = SendMessageRequest::new(
             turn.harness,
             PathBuf::from(&workspace.root),
             Some(native_session),
             turn.thread.mode,
             text,
         );
+        request.agent.clone_from(&turn.thread.agent);
+        request.model.clone_from(&turn.thread.model);
         adapter.send_message(
             &request,
             &mut |event| self.record_adapter_event(thread_id, turn.harness, turn.id, event),
@@ -98,12 +100,14 @@ impl ThreadService<'_> {
         let thread_id = &turn.thread.id;
         let workspace = self.store.get_workspace(&turn.thread.workspace_id)?;
         let context = self.render_handoff(&turn.thread)?;
-        let request = StartThreadRequest::new(
+        let mut request = StartThreadRequest::new(
             turn.harness,
             PathBuf::from(&workspace.root),
             turn.thread.mode,
             context,
         );
+        request.agent.clone_from(&turn.thread.agent);
+        request.model.clone_from(&turn.thread.model);
         let native_session = adapter.start_thread(
             &request,
             &mut |event| self.record_adapter_event(thread_id, turn.harness, turn.id, event),
@@ -157,14 +161,12 @@ impl ThreadService<'_> {
             other => bail!("adapter emitted unknown event kind {other:?}"),
         };
         if let Some(usage) = &event.usage {
-            self.store.record_usage_snapshot(
-                thread_id,
-                harness,
-                Some(turn_id),
-                usage_fields(usage),
-            )?;
-            if let Some(plan_fields) = plan_usage_fields(usage) {
-                self.store.upsert_plan_usage(harness, plan_fields)?;
+            let fields = usage_fields(usage, &self.plans, harness);
+            let plan = fields.plan.clone();
+            self.store
+                .record_usage_snapshot(thread_id, harness, Some(turn_id), fields)?;
+            if let (Some(plan), Some(plan_fields)) = (plan, plan_usage_fields(usage)) {
+                self.store.upsert_plan_usage(&plan, plan_fields)?;
             }
         }
         self.store.append_event(

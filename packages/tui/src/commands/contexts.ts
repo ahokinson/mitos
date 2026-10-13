@@ -1,15 +1,24 @@
 import type { FeedbackTone } from "@commands/feedbackLines.ts";
 import type { ThreadEventsState } from "@session/events.ts";
 import type {
+  abortThread,
   answerRequest,
   archiveThread,
   compactThread,
   deleteThread,
+  diffThread,
+  forkThread,
   hooksInit,
   hooksStatus,
+  listAgents,
+  listModels,
   noteThread,
   reassignHarness,
+  runCommand,
+  setAgent,
   setMode,
+  setModel,
+  shareThread,
 } from "@session/mutations.ts";
 import type { HarnessRequest } from "@session/requests.ts";
 import type { Thread, ThreadListState } from "@session/threads.ts";
@@ -42,6 +51,15 @@ export type CommandContext = {
     noteThread: typeof noteThread;
     setMode: typeof setMode;
     answerRequest: typeof answerRequest;
+    abortThread: typeof abortThread;
+    forkThread: typeof forkThread;
+    shareThread: typeof shareThread;
+    diffThread: typeof diffThread;
+    setAgent: typeof setAgent;
+    setModel: typeof setModel;
+    listAgents: typeof listAgents;
+    listModels: typeof listModels;
+    runCommand: typeof runCommand;
     hooksStatus: typeof hooksStatus;
     hooksInit: typeof hooksInit;
   };

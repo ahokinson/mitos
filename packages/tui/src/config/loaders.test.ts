@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { loadConfig } from "@config/loaders.ts";
 import { KnownHarness } from "@harness/harnesses.ts";
-import { DEFAULT_LAYOUT_CONFIG } from "@layout/trees.ts";
+import { DEFAULT_LAYOUT_CONFIG } from "@layout/configs.ts";
 import { DEFAULT_THEME_NAME } from "@theme/palettes.ts";
 
 let dir: string;
@@ -31,16 +31,16 @@ test("missing configuration scaffolds the named default theme and default layout
   );
 });
 
-test("loads named widgets, a split layout, and managed handoff settings", async () => {
+test("loads named panels, a split layout, and managed handoff settings", async () => {
   await writeFile(join(dir, "stats.hbs"), "{{harness}}");
   await writeFile(
     join(dir, "mitos.toml"),
-    `[session]\ndefault_harness = "codex"\n\n[handoff]\nmax_inline_bytes = 65536\n\n[widgets.conversation]\nkind = "conversation"\nfocus_key = "ctrl+1"\n\n[widgets.stats]\ntemplate = "stats.hbs"\n\n[layout]\ndirection = "row"\nchildren = [{ widget = "conversation" }, { widget = "stats", size = 30 }]\n`,
+    `[session]\ndefault_harness = "codex"\n\n[handoff]\nmax_inline_bytes = 65536\n\n[panels.conversation]\nkind = "conversation"\nfocus_key = "ctrl+1"\n\n[panels.stats]\ntemplate = "stats.hbs"\n\n[layout]\ndirection = "row"\nchildren = [{ panel = "conversation" }, { panel = "stats", size = 30 }]\n`,
   );
   const handle = await loadConfig(dir);
   expect(handle.config().session?.defaultHarness).toBe(KnownHarness.Codex);
   expect(handle.config().handoff?.maxInlineBytes).toBe(65_536);
-  expect(handle.config().layout?.widgets.stats).toEqual({
+  expect(handle.config().layout?.panels.stats).toEqual({
     templatePath: "stats.hbs",
     template: "{{harness}}",
   });
@@ -49,7 +49,19 @@ test("loads named widgets, a split layout, and managed handoff settings", async 
 test("an unreadable template view falls back to the default layout", async () => {
   await writeFile(
     join(dir, "mitos.toml"),
-    '[widgets.stats]\ntemplate = "missing.hbs"\n\n[layout]\nwidget = "stats"\n',
+    '[panels.stats]\ntemplate = "missing.hbs"\n\n[layout]\npanel = "stats"\n',
+  );
+  const handle = await loadConfig(dir);
+  expect(handle.config().layout).toEqual(DEFAULT_LAYOUT_CONFIG);
+  expect(warnSpy).toHaveBeenCalled();
+});
+
+test("a layout that declares two template views falls back to the default layout", async () => {
+  await writeFile(join(dir, "one.hbs"), "{{harness}}");
+  await writeFile(join(dir, "two.hbs"), "{{mining.sessions}}");
+  await writeFile(
+    join(dir, "mitos.toml"),
+    '[panels.conversation]\nkind = "conversation"\n\n[panels.one]\ntemplate = "one.hbs"\n\n[panels.two]\ntemplate = "two.hbs"\n\n[layout]\ndirection = "row"\nchildren = [{ panel = "conversation" }, { panel = "one", size = 3 }, { panel = "two", size = 3 }]\n',
   );
   const handle = await loadConfig(dir);
   expect(handle.config().layout).toEqual(DEFAULT_LAYOUT_CONFIG);
@@ -94,7 +106,7 @@ test("a declared custom theme can be selected by name", async () => {
 test("invalid named layout falls back without discarding unrelated session settings", async () => {
   await writeFile(
     join(dir, "mitos.toml"),
-    '[session]\ndefault_harness = "claude"\n\n[widgets.bad]\nkind = "missing"\n\n[layout]\nwidget = "bad"\n',
+    '[session]\ndefault_harness = "claude"\n\n[panels.bad]\nkind = "missing"\n\n[layout]\npanel = "bad"\n',
   );
   const handle = await loadConfig(dir);
   expect(handle.config().layout).toEqual(DEFAULT_LAYOUT_CONFIG);

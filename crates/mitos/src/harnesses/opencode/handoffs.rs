@@ -144,6 +144,10 @@ fn usage_of(session: &Record) -> Option<CollectedUsage> {
         .get("model")
         .and_then(parsed_container)
         .and_then(|model| string_value(model.get("id")).map(str::to_string));
+    let provider = session
+        .get("model")
+        .and_then(parsed_container)
+        .and_then(|model| string_value(model.get("providerID")).map(str::to_string));
     if input == 0 && output == 0 && cached == 0 && cost == 0.0 && model.is_none() {
         return None;
     }
@@ -153,6 +157,7 @@ fn usage_of(session: &Record) -> Option<CollectedUsage> {
         cached_input_tokens: Some(cached),
         cost_usd: Some(cost),
         model,
+        provider,
         ..CollectedUsage::default()
     })
 }

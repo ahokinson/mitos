@@ -1,0 +1,24 @@
+{{#color "accent"}}▍tool profile{{/color}}
+{{#color "textDim"}}────────────────────────{{/color}}
+{{#if mining.tools}}
+{{#color "textDim"}}calls per tool{{/color}}
+{{#each mining.tools}}
+{{#color "textDim"}}·{{/color}} {{this.label}} ×{{this.value}}
+{{/each}}
+
+{{#color "textDim"}}seconds burned per tool{{/color}}
+{{#each mining.tool_time}}
+{{#color "textDim"}}·{{/color}} {{this.label}} {{duration this.value}}
+{{/each}}
+{{#unless mining.tool_time}}
+{{#color "textDim"}}this harness reports no tool timings{{/color}}
+{{/unless}}
+
+{{#color "textDim"}}the aftermath{{/color}}
+patches      {{mining.patches}}
+files touched {{mining.files_patched}}
+forks        {{mining.forks}}
+total tool time {{mining.tool_seconds}}
+{{else}}
+{{#color "textDim"}}no history mined yet…{{/color}}
+{{/if}}

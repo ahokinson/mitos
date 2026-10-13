@@ -15,10 +15,10 @@ use crate::ports::{EventSink, HarnessAdapter};
 use crate::store::Store;
 use crate::wire::events::AdapterEvent;
 use crate::wire::requests::{
-    AdapterRequest, AttachThreadRequest, DetachThreadRequest, HandoffRequest, SendMessageRequest,
-    StartThreadRequest,
+    AdapterRequest, AttachThreadRequest, DetachThreadRequest, HandoffRequest, MiningRequest,
+    SendMessageRequest, StartThreadRequest,
 };
-use crate::wire::responses::{Capabilities, CollectedHandoff, LaunchPlan};
+use crate::wire::responses::{Capabilities, CollectedHandoff, LaunchPlan, MiningReport};
 
 struct FakeAdapter {
     capabilities: Value,
@@ -122,6 +122,19 @@ impl HarnessAdapter for FakeAdapter {
         self.calls.borrow_mut().push("detach_thread");
         Ok(())
     }
+
+    fn mine_history(&self, _request: &MiningRequest) -> MiningReport {
+        self.calls.borrow_mut().push("mine_history");
+        MiningReport::default()
+    }
+}
+
+#[test]
+fn the_fake_adapter_keeps_no_history_to_mine() {
+    let adapter = FakeAdapter::new();
+    let request = MiningRequest::new(None, None, 10);
+    assert_eq!(adapter.mine_history(&request), MiningReport::default());
+    assert_eq!(adapter.calls(), ["mine_history"]);
 }
 
 struct Fixture {
@@ -224,15 +237,58 @@ fn send_records_user_message_and_adapter_events_in_order() {
     );
     assert_eq!(events[2].payload, Some(json!({"name": "Edit"})));
     assert_eq!(events[2].harness, Some(HarnessKind::Claude));
-    assert_eq!(
-        fixture
-            .store
-            .plan_usage(HarnessKind::Claude)
-            .unwrap()
-            .unwrap()
-            .plan_week_percent,
-        Some(7.5)
-    );
+    assert!(fixture.store.plan_usage("claude-pro").unwrap().is_none());
+}
+
+#[test]
+fn chatgpt_usage_is_shared_between_opencode_and_codex() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.root.join("mitos.toml"),
+        "[plans]\nchatgpt = \"plus\"\n",
+    )
+    .unwrap();
+
+    let opencode = fixture.thread(Some("opencode"));
+    let mut via_opencode = FakeAdapter::new();
+    via_opencode.start_events = vec![json!({
+        "event": "usage",
+        "usage": {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "plan_five_hour_percent": 17.0
+        }
+    })];
+    fixture
+        .service()
+        .send(&opencode, "use Codex".into(), &via_opencode)
+        .unwrap();
+    let usage = fixture
+        .service()
+        .latest_usage(&opencode, HarnessKind::OpenCode)
+        .unwrap()
+        .unwrap();
+    assert_eq!(usage.plan.as_deref(), Some("chatgpt-plus"));
+    assert_eq!(usage.plan_label.as_deref(), Some("ChatGPT Plus"));
+    assert_eq!(usage.plan_five_hour_percent, Some(17.0));
+
+    let codex = fixture.thread(Some("codex"));
+    let mut direct = FakeAdapter::new();
+    direct.start_events = vec![json!({
+        "event": "usage",
+        "usage": { "plan_five_hour_percent": 23.0 }
+    })];
+    fixture
+        .service()
+        .send(&codex, "use Codex directly".into(), &direct)
+        .unwrap();
+    let usage = fixture
+        .service()
+        .latest_usage(&codex, HarnessKind::Codex)
+        .unwrap()
+        .unwrap();
+    assert_eq!(usage.plan.as_deref(), Some("chatgpt-plus"));
+    assert_eq!(usage.plan_five_hour_percent, Some(23.0));
 }
 
 #[test]
@@ -395,15 +451,7 @@ fn reassign_collects_evidence_records_a_carryover_and_rebinds() {
             EventKind::HarnessBound,
         ]
     );
-    assert_eq!(
-        fixture
-            .store
-            .plan_usage(HarnessKind::Claude)
-            .unwrap()
-            .unwrap()
-            .plan_five_hour_percent,
-        Some(42.0)
-    );
+    assert!(fixture.store.plan_usage("claude-pro").unwrap().is_none());
 }
 
 #[test]
@@ -1095,6 +1143,41 @@ fn set_mode_to_the_current_mode_records_nothing() {
         fixture.kinds(&thread_id).last(),
         Some(&EventKind::ModeChanged)
     );
+}
+
+#[test]
+fn a_forked_thread_shares_the_workspace_mode_and_native_session() {
+    let fixture = Fixture::new();
+    let source = fixture.thread(Some("opencode"));
+    let service = fixture.service();
+    service.set_mode(&source, ThreadMode::Plan).unwrap();
+    service
+        .bind_harness(&source, HarnessKind::OpenCode, Some(&json!("ses_parent")))
+        .unwrap();
+
+    let forked = service
+        .new_bound_thread(&source, HarnessKind::OpenCode, &json!("ses_child"))
+        .unwrap();
+    let target = service.native_target(&forked.id).unwrap();
+
+    assert_eq!(target.harness, HarnessKind::OpenCode);
+    assert_eq!(target.session, "ses_child");
+    assert_eq!(target.workdir, PathBuf::from("/workspace"));
+    assert_eq!(forked.mode, ThreadMode::Plan);
+    let parent = service.native_target(&source).unwrap();
+    assert_eq!(parent.session, "ses_parent");
+}
+
+#[test]
+fn native_target_requires_a_harness_and_a_native_session() {
+    let fixture = Fixture::new();
+    let unbound = fixture.thread(None);
+    let bound = fixture.thread(Some("opencode"));
+
+    let unbound = fixture.service().native_target(&unbound);
+    assert!(unbound.is_err());
+    let bound = fixture.service().native_target(&bound);
+    assert!(bound.is_err());
 }
 
 #[test]

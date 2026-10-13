@@ -1,0 +1,8 @@
+{{#color "accent"}}{{harness}}{{/color}}{{#if thread.status}} · {{thread.status}}{{/if}}
+{{#gradient "accent" "err"}}{{thread.id}}{{/gradient}}
+{{#if usage.context_percent}}ctx {{bar usage.context_percent 12}} {{usage.context_percent}}{{/if}}
+{{#if usage.cost}}spent {{usage.cost}} on this thread{{/if}}
+{{#if mining.sessions}}
+{{#color "textDim"}}{{mining.sessions}} sessions · {{mining.cost}} lifetime · {{mining.tool_calls}} calls{{/color}}
+{{/if}}
+⌂ {{workspace}}

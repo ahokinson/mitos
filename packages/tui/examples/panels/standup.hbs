@@ -1,0 +1,19 @@
+{{#color "accent"}}▍yesterday's standup{{/color}}
+{{#color "textDim"}}────────────────────────{{/color}}
+{{#if mining.recent}}
+{{#color "textDim"}}recent sessions{{/color}}
+{{#each mining.recent}}
+{{#color "textDim"}}·{{/color}} {{this.harness}} — {{clip this.title 12}}
+  {{#if this.cost_usd}}{{usd this.cost_usd}}{{/if}}{{#if this.tokens_input}}{{#if this.cost_usd}} · {{/if}}{{compact this.tokens_input}} in · {{compact this.tokens_cache_read}} cached{{/if}}
+{{/each}}
+
+{{#color "textDim"}}pace of work{{/color}}
+{{#each mining.session_days}}
+{{#color "textDim"}}·{{/color}} {{this.label}} {{this.value}} sessions
+{{/each}}
+
+{{#color "textDim"}}volume{{/color}}
+{{mining.messages}} messages — {{mining.messages_user}} yours, {{mining.messages_assistant}} the agents'
+{{else}}
+{{#color "textDim"}}no history mined yet…{{/color}}
+{{/if}}
