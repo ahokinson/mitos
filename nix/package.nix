@@ -40,8 +40,8 @@ let
   # `bun install` resolves platform-specific optional deps, so the vendored
   # tree hashes differently per system. Every supported system needs an entry.
   nodeModulesHashes = {
-    aarch64-darwin = "sha256-Y24JsZ2cjIcGdZDHVFj5L6Mzr3eUWIfJiTHIotpBEJo=";
-    aarch64-linux = "sha256-xbMew0tPZkzREYp4jDALKDOA4Hgpvqpkyrqg2chRRfo=";
+    aarch64-darwin = "sha256-2hBZ3/85SgDkIX+g3CGEG4N9k/WQgoZ7WaxUjY7WU9o=";
+    aarch64-linux = "sha256-dRxo+uQegr/LbGxmu8lE1RU3q170UT8KYRDHrd6djlw=";
     x86_64-linux = "sha256-mWZRSTG5TRvzpUwI1RGz5/l89Z7GI6BJqi5rSbuQ6xA=";
   };
 

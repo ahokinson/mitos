@@ -273,11 +273,12 @@ mod tests {
         let process = FakeProcess::new(Some("listening on http://127.0.0.1:4096\n"), Some(""));
         let killed = process.killed.clone();
         let waited = process.waited.clone();
+        let password = uuid::Uuid::new_v4().to_string();
 
-        let (_process, access) = start_with_process(process, "password".into()).unwrap();
+        let (_process, access) = start_with_process(process, password.clone()).unwrap();
 
         assert_eq!(access.base, "http://127.0.0.1:4096");
-        assert_eq!(access.password, "password");
+        assert_eq!(access.password, password);
         assert!(!killed.load(Ordering::Relaxed));
         assert!(!waited.load(Ordering::Relaxed));
     }
@@ -291,7 +292,7 @@ mod tests {
             let killed = process.killed.clone();
             let waited = process.waited.clone();
 
-            assert!(start_with_process(process, "password".into()).is_err());
+            assert!(start_with_process(process, uuid::Uuid::new_v4().to_string()).is_err());
             assert!(killed.load(Ordering::Relaxed));
             assert!(waited.load(Ordering::Relaxed));
         }
@@ -308,7 +309,7 @@ mod tests {
         let waited = process.waited.clone();
         let result = finish_startup(
             process,
-            "password".into(),
+            uuid::Uuid::new_v4().to_string(),
             Err(mpsc::RecvTimeoutError::Disconnected),
             thread::spawn(|| "fatal configuration error".into()),
         );
@@ -323,7 +324,7 @@ mod tests {
         let process = FakeProcess::new(None, None);
         let result = finish_startup(
             process,
-            "password".into(),
+            uuid::Uuid::new_v4().to_string(),
             Err(mpsc::RecvTimeoutError::Timeout),
             thread::spawn(String::new),
         );
