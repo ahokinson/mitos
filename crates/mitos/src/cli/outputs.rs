@@ -65,7 +65,7 @@ mod tests {
         })
         .unwrap();
 
-        assert!(output.is_empty());
+        assert_eq!(output, b"");
         assert_eq!(rendered.as_deref(), Some("ready"));
     }
 }

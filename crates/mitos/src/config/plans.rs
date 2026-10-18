@@ -162,7 +162,10 @@ mod tests {
                 Plan::ChatGpt(ChatGptTier::Plus),
             ]
         );
-        assert!(plans_for(Some("[plans]\nopencode_go = \"enterprise\"\n")).is_empty());
+        assert_eq!(
+            plans_for(Some("[plans]\nopencode_go = \"enterprise\"\n")),
+            Vec::<Plan>::new()
+        );
     }
 
     #[test]
@@ -230,7 +233,7 @@ mod tests {
 
     #[test]
     fn malformed_configurations_are_ignored_and_pro_is_supported() {
-        assert!(plans_for(Some("[plans")).is_empty());
+        assert_eq!(plans_for(Some("[plans")), Vec::<Plan>::new());
         assert_eq!(
             plans_for(Some("[plans]\nchatgpt = \"pro\"\n")),
             [Plan::ChatGpt(ChatGptTier::Pro)]
