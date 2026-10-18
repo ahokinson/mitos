@@ -91,14 +91,14 @@ mod tests {
         let path = dir.join("history.db");
         create_database(
             &path,
-            "CREATE TABLE t (id INTEGER, name TEXT, score REAL, note TEXT); \
-             INSERT INTO t VALUES (1, 'a', 1.5, NULL);",
+            "CREATE TABLE t (id INTEGER, name TEXT, score REAL, note TEXT, data BLOB); \
+             INSERT INTO t VALUES (1, 'a', 1.5, NULL, x'00ff');",
         );
         let database = ReadonlyDatabase::open(&path).unwrap();
         let rows = database.query("SELECT * FROM t WHERE id = ?", [1]).unwrap();
         assert_eq!(
             Value::Object(rows[0].clone()),
-            json!({ "id": 1, "name": "a", "score": 1.5, "note": null })
+            json!({ "id": 1, "name": "a", "score": 1.5, "note": null, "data": null })
         );
         assert!(database.query("SELECT * FROM missing", ()).is_err());
         assert!(ReadonlyDatabase::open(&dir.join("absent.db")).is_none());

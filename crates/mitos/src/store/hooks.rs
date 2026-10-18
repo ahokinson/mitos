@@ -17,15 +17,18 @@ impl Store {
         &self,
         observation: &Observation,
         thread_id: Option<&ThreadId>,
+        plan: Option<&str>,
     ) -> Result<()> {
         self.execute(
             "INSERT INTO hook_observations \
-             (harness, native_session, thread_id, cwd, model, event, cost_usd, context_used_tokens, context_limit_tokens, observed_at) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) \
+              (harness, native_session, thread_id, cwd, model, provider, plan, event, cost_usd, context_used_tokens, context_limit_tokens, observed_at) \
+              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) \
              ON CONFLICT(harness, native_session) DO UPDATE SET \
                thread_id = COALESCE(excluded.thread_id, thread_id), \
-               cwd = COALESCE(excluded.cwd, cwd), \
-               model = COALESCE(excluded.model, model), \
+                cwd = COALESCE(excluded.cwd, cwd), \
+                model = COALESCE(excluded.model, model), \
+                provider = COALESCE(excluded.provider, provider), \
+                plan = COALESCE(excluded.plan, plan), \
                event = COALESCE(excluded.event, event), \
                cost_usd = COALESCE(excluded.cost_usd, cost_usd), \
                context_used_tokens = COALESCE(excluded.context_used_tokens, context_used_tokens), \
@@ -37,6 +40,8 @@ impl Store {
                 thread_id.map(ThreadId::as_str),
                 observation.cwd.clone(),
                 observation.model.clone(),
+                observation.provider.clone(),
+                plan,
                 observation.event.clone(),
                 observation.cost_usd,
                 sql_count(observation.context_used_tokens),
@@ -44,16 +49,18 @@ impl Store {
                 now().as_str()
             ],
         )?;
-        if let Some(plan) = &observation.plan
+        if let (Some(plan_id), Some(plan)) = (plan, &observation.plan)
             && (plan.five_hour_percent.is_some() || plan.week_percent.is_some())
         {
             self.upsert_plan_usage(
-                observation.harness,
+                plan_id,
                 PlanUsageFields {
                     plan_five_hour_percent: plan.five_hour_percent,
                     plan_five_hour_resets_at: plan.five_hour_resets_at.clone(),
                     plan_week_percent: plan.week_percent,
                     plan_week_resets_at: plan.week_resets_at.clone(),
+                    plan_month_percent: None,
+                    plan_month_resets_at: None,
                 },
             )?;
         }
@@ -112,6 +119,7 @@ mod tests {
                     ..observation("s1")
                 },
                 None,
+                None,
             )
             .unwrap();
         store
@@ -120,6 +128,7 @@ mod tests {
                     event: Some("Stop".into()),
                     ..observation("s1")
                 },
+                None,
                 None,
             )
             .unwrap();
@@ -138,6 +147,7 @@ mod tests {
                         cost_usd: Some(cost),
                         ..observation("s1")
                     },
+                    None,
                     None,
                 )
                 .unwrap();
@@ -158,6 +168,7 @@ mod tests {
                     ..observation("s1")
                 },
                 Some(&thread.id),
+                None,
             )
             .unwrap();
         store
@@ -167,6 +178,7 @@ mod tests {
                     cost_usd: Some(9.0),
                     ..observation("s1")
                 },
+                None,
                 None,
             )
             .unwrap();
@@ -191,10 +203,11 @@ mod tests {
                     ..observation("s1")
                 },
                 None,
+                Some("chatgpt-plus"),
             )
             .unwrap();
 
-        let plan = store.plan_usage(HarnessKind::Claude).unwrap().unwrap();
+        let plan = store.plan_usage("chatgpt-plus").unwrap().unwrap();
         assert_eq!(plan.plan_five_hour_percent, Some(23.5));
         fs::remove_dir_all(root).unwrap();
     }
@@ -212,6 +225,7 @@ mod tests {
                     ..observation("s1")
                 },
                 None,
+                Some("chatgpt-plus"),
             )
             .unwrap();
         store
@@ -221,10 +235,11 @@ mod tests {
                     ..observation("s1")
                 },
                 None,
+                Some("chatgpt-plus"),
             )
             .unwrap();
 
-        let plan = store.plan_usage(HarnessKind::Claude).unwrap().unwrap();
+        let plan = store.plan_usage("chatgpt-plus").unwrap().unwrap();
         assert_eq!(plan.plan_week_percent, Some(40.0));
         fs::remove_dir_all(root).unwrap();
     }

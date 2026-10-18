@@ -30,6 +30,8 @@ function thread(overrides: Partial<Thread> & { id: string }): Thread {
     workspace_id: "ws1",
     status: ThreadStatus.Active,
     mode: ThreadMode.Build,
+    agent: null,
+    model: null,
     active_harness: null,
     native_session: null,
     last_event_seq: 0,
@@ -61,11 +63,26 @@ function createFakeContext(options: {
       | "noteThread"
       | "setMode"
       | "answerRequest"
+      | "abortThread"
+      | "forkThread"
+      | "shareThread"
+      | "diffThread"
+      | "setAgent"
+      | "setModel"
+      | "listAgents"
+      | "listModels"
+      | "runCommand"
       | "hooksStatus"
       | "hooksInit",
       Error
     >
   >;
+  forkedThread?: Thread;
+  sharedUrl?: string;
+  diffLines?: string[];
+  agentLines?: string[];
+  modelLines?: string[];
+  commandOutput?: string;
   hookStatus?: HookStatus[];
   hookOutcomes?: HookInitOutcome[];
 }) {
@@ -150,6 +167,51 @@ function createFakeContext(options: {
         if (options.failWith?.answerRequest)
           throw options.failWith.answerRequest;
       },
+      abortThread: async (threadId) => {
+        calls.push({ name: "abortThread", args: [threadId] });
+        if (options.failWith?.abortThread) throw options.failWith.abortThread;
+      },
+      forkThread: async (threadId) => {
+        calls.push({ name: "forkThread", args: [threadId] });
+        if (options.failWith?.forkThread) throw options.failWith.forkThread;
+        return (
+          options.forkedThread ??
+          thread({ id: "thrn_fork", active_harness: "opencode" })
+        );
+      },
+      shareThread: async (threadId) => {
+        calls.push({ name: "shareThread", args: [threadId] });
+        if (options.failWith?.shareThread) throw options.failWith.shareThread;
+        return options.sharedUrl ?? "https://opencode.ai/s/abc";
+      },
+      diffThread: async (threadId) => {
+        calls.push({ name: "diffThread", args: [threadId] });
+        if (options.failWith?.diffThread) throw options.failWith.diffThread;
+        return options.diffLines ?? [];
+      },
+      setAgent: async (threadId, agent) => {
+        calls.push({ name: "setAgent", args: [threadId, agent] });
+        if (options.failWith?.setAgent) throw options.failWith.setAgent;
+      },
+      setModel: async (threadId, model) => {
+        calls.push({ name: "setModel", args: [threadId, model] });
+        if (options.failWith?.setModel) throw options.failWith.setModel;
+      },
+      listAgents: async (threadId) => {
+        calls.push({ name: "listAgents", args: [threadId] });
+        if (options.failWith?.listAgents) throw options.failWith.listAgents;
+        return options.agentLines ?? ["build: writes code", "plan: read only"];
+      },
+      listModels: async (threadId) => {
+        calls.push({ name: "listModels", args: [threadId] });
+        if (options.failWith?.listModels) throw options.failWith.listModels;
+        return options.modelLines ?? ["opencode/glm-5.3"];
+      },
+      runCommand: async (threadId, command, args) => {
+        calls.push({ name: "runCommand", args: [threadId, command, args] });
+        if (options.failWith?.runCommand) throw options.failWith.runCommand;
+        return options.commandOutput ?? "done";
+      },
       hooksStatus: async () => {
         calls.push({ name: "hooksStatus", args: [] });
         if (options.failWith?.hooksStatus) throw options.failWith.hooksStatus;
@@ -181,6 +243,12 @@ const CODEX_THREAD = thread({
   id: "22222222-aaaa-bbbb-cccc-222222222222",
   active_harness: "codex",
   opening_message: "fix another bug",
+});
+const OPENCODE_THREAD = thread({
+  id: "33333333-aaaa-bbbb-cccc-333333333333",
+  active_harness: "opencode",
+  native_session: "ses_1",
+  opening_message: "build the thing",
 });
 
 test("unknown command produces an error note, not a mutation", async () => {
@@ -774,4 +842,214 @@ test("/delete confirm without an id prefix is rejected", async () => {
   state.pendingDelete = { threadId: CLAUDE_THREAD.id, label: "x" };
   await run("/delete confirm", ctx);
   expect(calls).toEqual([]);
+});
+
+test("/abort asks OpenCode to stop the selected thread's turn", async () => {
+  const { ctx, notes, calls } = createFakeContext({
+    selected: OPENCODE_THREAD,
+  });
+  await run("/abort", ctx);
+  expect(calls).toEqual([{ name: "abortThread", args: [OPENCODE_THREAD.id] }]);
+  expect(notes[0]?.tone).toBe(FeedbackTone.Info);
+});
+
+test("/abort without a selected thread prints usage", async () => {
+  const { ctx, notes, calls } = createFakeContext({});
+  await run("/abort", ctx);
+  expect(calls).toEqual([]);
+  expect(notes[0]?.tone).toBe(FeedbackTone.Error);
+});
+
+test("/fork selects the forked thread and notes its id", async () => {
+  const forked = thread({
+    id: "44444444-aaaa-bbbb-cccc-444444444444",
+    active_harness: "opencode",
+  });
+  const { ctx, notes, calls, state } = createFakeContext({
+    selected: OPENCODE_THREAD,
+    forkedThread: forked,
+  });
+  await run("/fork", ctx);
+  expect(calls).toEqual([{ name: "forkThread", args: [OPENCODE_THREAD.id] }]);
+  expect(state.selected).toEqual(forked);
+  expect(state.currentHarness).toBe("opencode");
+  expect(notes[0]?.lines[0]).toContain("44444444");
+});
+
+test("/fork failure surfaces the core's error", async () => {
+  const { ctx, notes, calls } = createFakeContext({
+    selected: CLAUDE_THREAD,
+    failWith: { forkThread: new Error("only OpenCode threads support fork") },
+  });
+  await run("/fork", ctx);
+  expect(calls.length).toBe(1);
+  expect(notes[0]?.tone).toBe(FeedbackTone.Error);
+  expect(notes[0]?.lines[0]).toContain("only OpenCode threads support fork");
+});
+
+test("/share prints the returned link", async () => {
+  const { ctx, notes, calls } = createFakeContext({
+    selected: OPENCODE_THREAD,
+    sharedUrl: "https://opencode.ai/s/xyz",
+  });
+  await run("/share", ctx);
+  expect(calls).toEqual([{ name: "shareThread", args: [OPENCODE_THREAD.id] }]);
+  expect(notes[0]?.lines[0]).toBe("https://opencode.ai/s/xyz");
+});
+
+test("/diff lists the changed files and notes when none", async () => {
+  const withChanges = createFakeContext({
+    selected: OPENCODE_THREAD,
+    diffLines: ["src/a.rs: +3 -1", "src/b.rs: +0 -2"],
+  });
+  await run("/diff", withChanges.ctx);
+  expect(withChanges.notes[0]?.lines).toEqual([
+    "src/a.rs: +3 -1",
+    "src/b.rs: +0 -2",
+  ]);
+
+  const empty = createFakeContext({ selected: OPENCODE_THREAD });
+  await run("/diff", empty.ctx);
+  expect(empty.notes[0]?.lines[0]).toContain("No file changes");
+});
+
+test("/agent with a name sets it; bare lists the server's agents", async () => {
+  const setting = createFakeContext({ selected: OPENCODE_THREAD });
+  await run("/agent review", setting.ctx);
+  expect(setting.calls).toEqual([
+    { name: "setAgent", args: [OPENCODE_THREAD.id, "review"] },
+  ]);
+  expect(setting.notes[0]?.lines[0]).toBe("Agent set to review.");
+
+  const listing = createFakeContext({ selected: OPENCODE_THREAD });
+  await run("/agent", listing.ctx);
+  expect(listing.calls).toEqual([
+    { name: "listAgents", args: [OPENCODE_THREAD.id] },
+  ]);
+  expect(listing.notes[0]?.lines).toEqual([
+    "build: writes code",
+    "plan: read only",
+  ]);
+});
+
+test("/model with a reference sets it; bare lists the defaults", async () => {
+  const setting = createFakeContext({ selected: OPENCODE_THREAD });
+  await run("/model opencode/glm-5.3", setting.ctx);
+  expect(setting.calls).toEqual([
+    { name: "setModel", args: [OPENCODE_THREAD.id, "opencode/glm-5.3"] },
+  ]);
+  expect(setting.notes[0]?.lines[0]).toBe("Model set to opencode/glm-5.3.");
+
+  const listing = createFakeContext({ selected: OPENCODE_THREAD });
+  await run("/model", listing.ctx);
+  expect(listing.calls).toEqual([
+    { name: "listModels", args: [OPENCODE_THREAD.id] },
+  ]);
+  expect(listing.notes[0]?.lines).toEqual(["opencode/glm-5.3"]);
+});
+
+test("/oc runs the command and prints its text", async () => {
+  const { ctx, notes, calls } = createFakeContext({
+    selected: OPENCODE_THREAD,
+    commandOutput: "initialized",
+  });
+  await run("/oc init", ctx);
+  expect(calls).toEqual([
+    { name: "runCommand", args: [OPENCODE_THREAD.id, "init", []] },
+  ]);
+  expect(notes[0]?.lines[0]).toBe("initialized");
+});
+
+test("/oc without a command prints usage", async () => {
+  const { ctx, notes, calls } = createFakeContext({
+    selected: OPENCODE_THREAD,
+  });
+  await run("/oc", ctx);
+  expect(calls).toEqual([]);
+  expect(notes[0]?.tone).toBe(FeedbackTone.Error);
+});
+
+test("session commands need a selected thread", async () => {
+  for (const line of [
+    "/fork",
+    "/share",
+    "/diff",
+    "/agent",
+    "/model",
+    "/oc init",
+  ]) {
+    const { ctx, notes, calls } = createFakeContext({});
+    await run(line, ctx);
+    expect(calls).toEqual([]);
+    expect(notes[0]?.tone).toBe(FeedbackTone.Error);
+    expect(notes[0]?.lines[0]).toContain("No thread selected");
+  }
+});
+
+type MutationFailure = NonNullable<
+  Parameters<typeof createFakeContext>[0]
+>["failWith"];
+
+test("session commands surface a core failure instead of throwing", async () => {
+  const cases: [
+    string,
+    (
+      | "abortThread"
+      | "shareThread"
+      | "diffThread"
+      | "setAgent"
+      | "setModel"
+      | "runCommand"
+    ),
+    string,
+  ][] = [
+    ["/abort", "abortThread", "no turn running"],
+    ["/share", "shareThread", "publish refused"],
+    ["/diff", "diffThread", "no native session"],
+    ["/agent review", "setAgent", "unknown agent"],
+    ["/model opencode/x", "setModel", "unknown model"],
+    ["/oc init", "runCommand", "no such command"],
+  ];
+  for (const [line, mutation, message] of cases) {
+    const { ctx, notes, calls } = createFakeContext({
+      selected: OPENCODE_THREAD,
+      failWith: { [mutation]: new Error(message) } as MutationFailure,
+    });
+    await run(line, ctx);
+    expect(calls.map((call) => call.name)).toEqual([mutation]);
+    expect(notes[0]?.tone).toBe(FeedbackTone.Error);
+    expect(notes[0]?.lines[0]).toBe(message);
+  }
+});
+
+test("empty outputs get their own fallback notes", async () => {
+  const share = createFakeContext({
+    selected: OPENCODE_THREAD,
+    sharedUrl: "",
+  });
+  await run("/share", share.ctx);
+  expect(share.notes[0]?.lines[0]).toBe("OpenCode returned no link.");
+
+  const oc = createFakeContext({
+    selected: OPENCODE_THREAD,
+    commandOutput: "",
+  });
+  await run("/oc init", oc.ctx);
+  expect(oc.notes[0]?.lines[0]).toBe("The command returned no text.");
+
+  const agents = createFakeContext({
+    selected: OPENCODE_THREAD,
+    agentLines: [],
+  });
+  await run("/agent", agents.ctx);
+  expect(agents.notes[0]?.lines[0]).toBe("The server reported no agents.");
+
+  const models = createFakeContext({
+    selected: OPENCODE_THREAD,
+    modelLines: [],
+  });
+  await run("/model", models.ctx);
+  expect(models.notes[0]?.lines[0]).toBe(
+    "The server reported no default models.",
+  );
 });

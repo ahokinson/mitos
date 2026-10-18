@@ -91,3 +91,34 @@ fn fnv1a(bytes: &[u8]) -> String {
     }
     format!("{hash:016x}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checkout_exposes_its_root_git_directory_and_stable_key() {
+        let checkout = Checkout {
+            root: PathBuf::from("/work/mitos"),
+            git: Some(GitRepository {
+                root: PathBuf::from("/work/mitos"),
+                git_dir: PathBuf::from("/work/mitos/.git"),
+            }),
+        };
+
+        assert_eq!(checkout.root(), Path::new("/work/mitos"));
+        assert_eq!(checkout.git_dir(), Some(Path::new("/work/mitos/.git")));
+        assert_eq!(checkout.key(), "1263ee013bf15718");
+    }
+
+    #[test]
+    fn non_git_checkouts_have_no_git_directory() {
+        let checkout = Checkout {
+            root: PathBuf::from("/work/plain"),
+            git: None,
+        };
+
+        assert_eq!(checkout.git_dir(), None);
+        assert_eq!(fnv1a(b""), "cbf29ce484222325");
+    }
+}

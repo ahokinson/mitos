@@ -6,10 +6,10 @@ use serde_json::Value;
 use crate::domain::HarnessKind;
 use crate::wire::events::AdapterEvent;
 use crate::wire::requests::{
-    AdapterRequest, AttachThreadRequest, DetachThreadRequest, HandoffRequest, SendMessageRequest,
-    StartThreadRequest,
+    AdapterRequest, AttachThreadRequest, DetachThreadRequest, HandoffRequest, MiningRequest,
+    SendMessageRequest, StartThreadRequest,
 };
-use crate::wire::responses::{Capabilities, CollectedHandoff, LaunchPlan};
+use crate::wire::responses::{Capabilities, CollectedHandoff, LaunchPlan, MiningReport};
 
 pub type EventSink<'a> = dyn FnMut(AdapterEvent) -> Result<()> + 'a;
 
@@ -41,4 +41,8 @@ pub trait HarnessAdapter {
 
     /// Must default to leaving the native session running.
     fn detach_thread(&self, request: &DetachThreadRequest) -> Result<()>;
+
+    /// Mined figures from the harness's own stored history; an adapter whose
+    /// harness keeps none reports the default.
+    fn mine_history(&self, request: &MiningRequest) -> MiningReport;
 }

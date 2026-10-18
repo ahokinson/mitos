@@ -5,7 +5,7 @@
     "build": "bun run scripts/build.ts",
     "check": "bun run lint && bun run format:check",
     "coverage": "bun run coverage:ts && bun run coverage:rust",
-    "coverage:rust": "cargo llvm-cov --workspace --fail-under-lines 95 --fail-under-functions 95 --lcov --output-path coverage/rust.lcov && cargo llvm-cov report",
+    "coverage:rust": "cargo llvm-cov --workspace --fail-under-lines 95 --fail-under-functions 95 --lcov --output-path coverage/rust.lcov -- --test-threads=1 && cargo llvm-cov report",
     "coverage:ts": "bun test --preload @opentui/solid/preload --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=coverage/ts packages/tui/src",
     "format": "bun run format:ts && bun run format:rust",
     "format:check": "bun run format:check:ts && bun run format:check:rust",

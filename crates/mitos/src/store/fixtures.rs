@@ -4,7 +4,7 @@ use anyhow::Result;
 use libsql::params;
 
 use super::Store;
-use crate::domain::{HarnessKind, Thread, id};
+use crate::domain::{Thread, id};
 
 /// Account-wide, not thread-scoped.
 pub struct HarnessPlanUsage {
@@ -13,10 +13,10 @@ pub struct HarnessPlanUsage {
 }
 
 impl Store {
-    pub fn plan_usage(&self, harness: HarnessKind) -> Result<Option<HarnessPlanUsage>> {
+    pub fn plan_usage(&self, plan: &str) -> Result<Option<HarnessPlanUsage>> {
         self.query_optional(
-            "SELECT plan_five_hour_percent, plan_week_percent FROM harness_plan_usage WHERE harness = ?1",
-            params![harness.as_str()],
+            "SELECT plan_five_hour_percent, plan_week_percent FROM plan_usage WHERE plan = ?1",
+            params![plan],
             |row| {
                 Ok(HarnessPlanUsage {
                     plan_five_hour_percent: row.get(0)?,

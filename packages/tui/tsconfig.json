@@ -27,7 +27,7 @@
       "@layout/*": ["src/layout/*"],
       "@session/*": ["src/session/*"],
       "@theme/*": ["src/theme/*"],
-      "@widgets/*": ["src/widgets/*"]
+      "@panels/*": ["src/panels/*"]
     }
   },
   "include": ["src"],

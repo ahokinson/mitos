@@ -49,6 +49,33 @@ impl HandoffRequest {
     }
 }
 
+/// How many entries a merged mining report keeps per series and list.
+pub const DEFAULT_TOP: i64 = 10;
+
+const MS_PER_DAY: i64 = 86_400_000;
+
+/// Filters for a mining pass over a harness's stored history; providers that
+/// cannot honor a filter ignore it rather than fail.
+#[derive(Debug)]
+pub struct MiningRequest {
+    pub directory: Option<String>,
+    pub since_ms: Option<i64>,
+    pub top: i64,
+}
+
+impl MiningRequest {
+    /// `since_days` counts back from now; `None` reads the whole history.
+    pub fn new(directory: Option<String>, since_days: Option<i64>, top: i64) -> Self {
+        let since_ms =
+            since_days.map(|days| chrono::Utc::now().timestamp_millis() - days * MS_PER_DAY);
+        Self {
+            directory,
+            since_ms,
+            top: top.max(1),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct StartThreadRequest {
     pub harness: HarnessKind,
@@ -56,6 +83,10 @@ pub struct StartThreadRequest {
     pub mode: ThreadMode,
     pub initial_context: String,
     pub ephemeral: bool,
+    /// A harness agent override; `None` follows the mode's default agent.
+    pub agent: Option<String>,
+    /// A model reference, `provider/model`; `None` follows the harness default.
+    pub model: Option<String>,
 }
 
 impl StartThreadRequest {
@@ -71,6 +102,8 @@ impl StartThreadRequest {
             mode,
             initial_context,
             ephemeral: false,
+            agent: None,
+            model: None,
         }
     }
 
@@ -104,6 +137,10 @@ pub struct SendMessageRequest {
     pub native_session: Option<Value>,
     pub mode: ThreadMode,
     pub text: String,
+    /// A harness agent override; `None` follows the mode's default agent.
+    pub agent: Option<String>,
+    /// A model reference, `provider/model`; `None` follows the harness default.
+    pub model: Option<String>,
 }
 
 impl SendMessageRequest {
@@ -120,6 +157,8 @@ impl SendMessageRequest {
             native_session,
             mode,
             text,
+            agent: None,
+            model: None,
         }
     }
 }

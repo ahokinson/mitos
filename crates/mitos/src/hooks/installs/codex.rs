@@ -332,6 +332,19 @@ mod tests {
     }
 
     #[test]
+    fn status_reports_invalid_json_as_a_problem() {
+        let dir = scratch_dir();
+        let hooks = dir.join("hooks.json");
+        fs::write(&hooks, "nope").unwrap();
+
+        let report = status(&hooks, &dir.join("config.toml"));
+
+        assert!(!report.installed);
+        assert_eq!(report.problems.len(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_read_only_directory_is_reported_with_a_snippet() {
         use std::os::unix::fs::PermissionsExt;
         let dir = scratch_dir();

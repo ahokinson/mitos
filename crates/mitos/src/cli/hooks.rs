@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use super::args::{HookArgs, HooksCommand};
 use super::outputs::emit;
+use crate::config::{configured_plans, plan_for};
 use crate::domain::{HarnessKind, ThreadId, Timestamp};
 use crate::hooks::{self, HookStatus, InitOutcome, InitResult, Locations, Trust};
 use crate::store::Store;
@@ -42,11 +43,20 @@ fn record(state_dir: Option<PathBuf>, args: &HookArgs, input: &[u8]) -> Result<(
         return Ok(());
     };
     let store = Store::new(state_dir)?;
+    let plan = plan_for(
+        &configured_plans(store.config_root()),
+        observation.harness,
+        observation.provider.as_deref(),
+    );
     let thread = std::env::var("MITOS_THREAD_ID")
         .ok()
         .filter(|id| !id.is_empty())
         .map(ThreadId::from);
-    store.record_observation(&observation, thread.as_ref())
+    store.record_observation(
+        &observation,
+        thread.as_ref(),
+        plan.map(crate::config::Plan::id),
+    )
 }
 
 pub fn dispatch(store: &Store, command: HooksCommand) -> Result<()> {
@@ -201,7 +211,9 @@ mod tests {
         codex.trust = Trust::Untrusted;
         let mut claude = status(HarnessKind::Claude);
         claude.trust = Trust::Untrusted;
-        let lines = status_lines(&[codex, claude], now());
+        let mut hermes = status(HarnessKind::Hermes);
+        hermes.trust = Trust::Untrusted;
+        let lines = status_lines(&[codex, claude, hermes], now());
         assert_eq!(
             lines[0],
             "codex     installed, NOT APPROVED yet: approve it with /hooks inside Codex"
@@ -209,6 +221,10 @@ mod tests {
         assert_eq!(
             lines[3],
             "claude    installed, NOT APPROVED yet by the harness"
+        );
+        assert_eq!(
+            lines[6],
+            "hermes    installed, NOT APPROVED yet: approve it on Hermes's first run, or set hooks_auto_accept: true"
         );
     }
 
@@ -249,5 +265,31 @@ mod tests {
             ["codex     installed: ok", "          | a", "          | b"]
         );
         assert!(lines[3].starts_with("Run `mitos hooks status`"));
+    }
+
+    #[test]
+    fn init_reports_backups_manual_steps_and_existing_hooks() {
+        let outcomes = [
+            InitOutcome::new("claude", InitResult::Installed, "updated")
+                .with_backup(Some(PathBuf::from("/cfg/claude.json.mitos-backup"))),
+            InitOutcome::new("codex", InitResult::AlreadyInstalled, "unchanged"),
+            InitOutcome::new("hermes", InitResult::Manual, "add this hook")
+                .with_snippet("hooks_auto_accept: true\nother: value"),
+            InitOutcome::new("opencode", InitResult::Skipped, "read-only"),
+        ];
+
+        assert_eq!(
+            init_lines(&outcomes),
+            [
+                "claude    installed: updated",
+                "          backup: /cfg/claude.json.mitos-backup",
+                "codex     already installed: unchanged",
+                "hermes    manual step: add this hook",
+                "          | hooks_auto_accept: true",
+                "          | other: value",
+                "opencode  skipped: read-only",
+                "Run `mitos hooks status` to check that each harness has approved its hook.",
+            ]
+        );
     }
 }

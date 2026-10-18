@@ -40,9 +40,9 @@ let
   # `bun install` resolves platform-specific optional deps, so the vendored
   # tree hashes differently per system. Every supported system needs an entry.
   nodeModulesHashes = {
-    aarch64-darwin = "sha256-Y24JsZ2cjIcGdZDHVFj5L6Mzr3eUWIfJiTHIotpBEJo=";
-    aarch64-linux = "sha256-dRxo+uQegr/LbGxmu8lE1RU3q170UT8KYRDHrd6djlw=";
-    x86_64-linux = "sha256-mWZRSTG5TRvzpUwI1RGz5/l89Z7GI6BJqi5rSbuQ6xA=";
+    aarch64-darwin = "sha256-M1gVKVy1PlidIt9x3MxBz7qOdtu54cTc9zrBoGBVWyU=";
+    aarch64-linux = "sha256-+RiHFRL2ALv1ZHCGkifUr5p87t/AoTDwHewxQtcTu/Q=";
+    x86_64-linux = "sha256-e0MiaTDZoa/IYvYTL/Ei+rkjcUfqeNEP5jSdwAnOQ4I=";
   };
 
   # Only the manifests `bun install` reads, not the full `tuiSrc` tree — so
@@ -74,13 +74,15 @@ let
     buildPhase = ''
       runHook preBuild
       export HOME="$TMPDIR"
-      bun install --frozen-lockfile --ignore-scripts
+      bun install --frozen-lockfile --ignore-scripts --linker=hoisted
       runHook postBuild
     '';
     installPhase = ''
-      mkdir -p "$out/packages/tui"
+      mkdir -p "$out/packages/tui/node_modules"
       cp -r node_modules "$out/"
-      cp -r packages/tui/node_modules "$out/packages/tui/"
+      if test -d packages/tui/node_modules; then
+        cp -r packages/tui/node_modules/. "$out/packages/tui/node_modules/"
+      fi
     '';
     outputHashMode = "recursive";
     outputHash =

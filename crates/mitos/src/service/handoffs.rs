@@ -69,7 +69,11 @@ impl ThreadService<'_> {
             now(),
             thread.native_session.clone(),
         ))?;
-        let usage = handoff.usage.as_ref().map(usage_fields);
+        let usage = handoff
+            .usage
+            .as_ref()
+            .map(|usage| usage_fields(usage, &self.plans, harness));
+        let plan = usage.as_ref().and_then(|usage| usage.plan.clone());
         let plan_usage = handoff.usage.as_ref().and_then(plan_usage_fields);
         if let Some(native_session) = handoff.native_session.as_ref() {
             self.store
@@ -80,8 +84,8 @@ impl ThreadService<'_> {
             self.store
                 .record_usage_snapshot(&thread.id, harness, None, usage)?;
         }
-        if let Some(plan_usage) = plan_usage {
-            self.store.upsert_plan_usage(harness, plan_usage)?;
+        if let (Some(plan), Some(plan_usage)) = (plan, plan_usage) {
+            self.store.upsert_plan_usage(&plan, plan_usage)?;
         }
         Ok(())
     }

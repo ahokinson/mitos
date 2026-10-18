@@ -83,3 +83,21 @@ unsafe extern "system" {
         overlapped: *mut Overlapped,
     ) -> i32;
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lock_file_creates_and_holds_the_requested_file() {
+        let root = std::env::temp_dir().join(format!("mitos-lock-test-{}", crate::domain::id()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("thread.lock");
+
+        let lock = lock_file(&path).unwrap();
+        assert!(path.exists());
+        drop(lock);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+}

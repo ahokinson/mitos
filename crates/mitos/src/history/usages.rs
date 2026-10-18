@@ -46,11 +46,14 @@ fn usage_from_record(record: &Value) -> Option<CollectedUsage> {
             .into_iter()
             .find_map(|key| count_value(field(context, key))),
         model,
+        provider: None,
         turns: None,
         plan_five_hour_percent: five_hour.as_ref().map(|window| window.0),
         plan_five_hour_resets_at: five_hour.map(|window| window.1),
         plan_week_percent: week.as_ref().map(|window| window.0),
         plan_week_resets_at: week.map(|window| window.1),
+        plan_month_percent: None,
+        plan_month_resets_at: None,
     };
     has_any_field(&usage).then_some(usage)
 }
@@ -93,6 +96,7 @@ fn merge(base: CollectedUsage, next: CollectedUsage) -> CollectedUsage {
         context_used_tokens: next.context_used_tokens.or(base.context_used_tokens),
         context_limit_tokens: next.context_limit_tokens.or(base.context_limit_tokens),
         model: next.model.or(base.model),
+        provider: next.provider.or(base.provider),
         turns: next.turns.or(base.turns),
         plan_five_hour_percent: next.plan_five_hour_percent.or(base.plan_five_hour_percent),
         plan_five_hour_resets_at: next
@@ -100,6 +104,8 @@ fn merge(base: CollectedUsage, next: CollectedUsage) -> CollectedUsage {
             .or(base.plan_five_hour_resets_at),
         plan_week_percent: next.plan_week_percent.or(base.plan_week_percent),
         plan_week_resets_at: next.plan_week_resets_at.or(base.plan_week_resets_at),
+        plan_month_percent: next.plan_month_percent.or(base.plan_month_percent),
+        plan_month_resets_at: next.plan_month_resets_at.or(base.plan_month_resets_at),
     }
 }
 

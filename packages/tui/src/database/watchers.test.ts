@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { watchDatabase } from "@database/watchers.ts";
+import { watchDatabase, watchHistory } from "@database/watchers.ts";
 
 let dir: string;
 
@@ -55,5 +55,25 @@ test("stopping cancels a pending notification", async () => {
 
 test("an unwatchable directory yields a harmless cleanup", () => {
   const stop = watchDatabase(join(dir, "missing", "mitos.db"), () => {});
+  expect(stop).not.toThrow();
+});
+
+test("nested history files are reported once, debounced", async () => {
+  await mkdir(join(dir, "projects"), { recursive: true });
+  let changes = 0;
+  const stop = watchHistory(join(dir, "projects"), () => {
+    changes += 1;
+  });
+  const nested = join(dir, "projects", "-home-work");
+  await mkdir(nested, { recursive: true });
+  await writeFile(join(nested, "session.jsonl"), "a");
+  await writeFile(join(nested, "session.jsonl"), "b");
+  await sleep(300);
+  stop();
+  expect(changes).toBe(1);
+});
+
+test("an unwatchable history root yields a harmless cleanup", () => {
+  const stop = watchHistory(join(dir, "missing"), () => {});
   expect(stop).not.toThrow();
 });

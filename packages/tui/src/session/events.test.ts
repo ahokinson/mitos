@@ -408,6 +408,7 @@ describe("createThreadEventsState", () => {
 
 test("tool previews normalize and truncate the first line", () => {
   expect(toolPreview("  bun   test\npassed", "completed")).toBe("bun test…");
+  expect(toolPreview("bun test", "completed")).toBe("bun test");
   expect(toolPreview("", "started")).toBe("started");
   expect(toolPreview("x".repeat(121), "completed")).toBe(`${"x".repeat(120)}…`);
 });

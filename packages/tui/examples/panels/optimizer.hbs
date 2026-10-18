@@ -1,0 +1,81 @@
+{{#color "accent"}}▍switching profile{{/color}}
+{{#color "textDim"}}────────────────────────{{/color}}
+{{#if usage.harness}}
+{{#color "textDim"}}right now{{/color}}
+{{usage.harness}}{{#if usage.model}} · {{usage.model}}{{/if}}
+
+{{#if usage.plan_5h}}
+{{#color "textDim"}}rate 5h{{/color}}
+{{bar usage.plan_5h 18}} {{usage.plan_5h}}
+{{#color "textDim"}}{{usage.plan_5h_remaining}} left · {{usage.plan_5h_resets}}{{/color}}
+
+{{#if usage.plan_week}}
+{{#color "textDim"}}rate week{{/color}}
+{{bar usage.plan_week 18}} {{usage.plan_week}}
+{{#color "textDim"}}{{usage.plan_week_remaining}} left · resets{{/color}}
+{{#color "textDim"}}{{usage.plan_week_resets}}{{/color}}
+{{/if}}
+
+{{#if usage.plan_month}}
+{{#color "textDim"}}rate month{{/color}}
+{{bar usage.plan_month 18}} {{usage.plan_month}}
+{{#color "textDim"}}{{usage.plan_month_remaining}} left · resets{{/color}}
+{{#color "textDim"}}{{usage.plan_month_resets}}{{/color}}
+{{/if}}
+
+{{#gte usage.plan_5h 80}}
+{{#color "err"}}5h nearly spent — switch{{/color}}
+{{else}}
+{{#gte usage.plan_5h 70}}
+{{#color "warning"}}5h at {{usage.plan_5h}} — plan a switch{{/color}}
+{{else}}
+{{#gte usage.plan_week 70}}
+{{#color "warning"}}week at {{usage.plan_week}} — try another{{/color}}
+{{else}}
+{{#color "success"}}healthy — stay put{{/color}}
+{{/gte}}
+{{/gte}}
+{{/gte}}
+{{else}}
+{{#if estimate.5h}}
+{{#color "textDim"}}go plan · est{{/color}}
+{{bar estimate.5h 18}} {{estimate.5h}}
+{{#if estimate.5h_frees}}{{#color "textDim"}}{{estimate.5h_frees}} until it eases{{/color}}
+{{/if}}{{#color "textDim"}}week{{/color}}
+{{bar estimate.week 18}} {{estimate.week}}
+{{#color "textDim"}}month{{/color}}
+{{bar estimate.month 18}} {{estimate.month}}
+{{else}}
+{{#color "textDim"}}rate windows not reported{{/color}}
+{{/if}}
+{{/if}}
+
+{{#if usage.context_percent}}
+{{#color "textDim"}}context this session{{/color}}
+{{bar usage.context_percent 18}} {{usage.context_percent}}
+
+{{/if}}
+{{#color "textDim"}}this thread{{/color}}
+in      {{usage.tokens_in}}
+out     {{usage.tokens_out}}
+cached  {{usage.tokens_cached}}
+{{#if usage.cost}}cost    {{usage.cost}}{{/if}}
+{{else}}
+{{#color "textDim"}}waiting for the first turn to report usage…{{/color}}
+{{/if}}
+
+{{#if mining.harnesses}}
+{{#color "textDim"}}the record · by harness{{/color}}
+{{#each mining.harnesses}}
+{{#color "accent"}}·{{/color}} {{this.label}}
+  {{this.sessions}} sessions · {{compact this.messages}} msgs
+  {{#if this.cost_usd}}spent {{usd this.cost_usd}}{{else}}{{#color "textDim"}}no cost reported{{/color}}{{/if}}
+{{/each}}
+
+{{#color "textDim"}}model spread{{/color}}
+{{#each mining.model_sessions}}
+{{#color "textDim"}}·{{/color}} {{this.label}} ×{{this.value}}
+{{/each}}
+{{else}}
+{{#color "textDim"}}no harness histories mined yet…{{/color}}
+{{/if}}

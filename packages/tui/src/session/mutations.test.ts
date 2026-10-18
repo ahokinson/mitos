@@ -4,17 +4,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  abortThread,
   answerRequest,
   archiveThread,
   compactThread,
   createThread,
   deleteThread,
+  diffThread,
+  forkThread,
   hooksInit,
   hooksStatus,
+  listAgents,
+  listModels,
   noteThread,
   reassignHarness,
+  runCommand,
   sendMessage,
+  setAgent,
   setMode,
+  setModel,
+  shareThread,
 } from "@session/mutations.ts";
 import { Decision } from "@session/requests.ts";
 import { CompactMode, ThreadMode } from "@session/threads.ts";
@@ -101,6 +110,24 @@ const voidMutations: [string, () => Promise<void>, string, string][] = [
     "Could not set mode",
   ],
   [
+    "abortThread",
+    () => abortThread("t1"),
+    "thread|abort|t1|",
+    "Could not abort turn",
+  ],
+  [
+    "setAgent",
+    () => setAgent("t1", "build"),
+    "thread|agent|t1|build|",
+    "Could not set agent",
+  ],
+  [
+    "setModel",
+    () => setModel("t1", "opencode/glm-5.3"),
+    "thread|model|t1|opencode/glm-5.3|",
+    "Could not set model",
+  ],
+  [
     "answerRequest",
     () => answerRequest("t1", "r1", { decision: Decision.Approve }),
     "thread|answer|t1|--request|r1|--approve|",
@@ -127,6 +154,104 @@ for (const [name, invoke, expected, fallback] of voidMutations) {
     await expect(invoke()).rejects.toThrow("from stderr");
   });
 }
+
+/** Mutations whose payload is the core's stdout: a URL, summary lines, or
+ * trimmed text. */
+const stdoutMutations: [
+  string,
+  () => Promise<string | string[]>,
+  string,
+  string,
+  string,
+  string | string[],
+][] = [
+  [
+    "shareThread",
+    () => shareThread("t1"),
+    "thread|share|t1|",
+    "Could not share thread",
+    "https://opencode.ai/s/1",
+    "https://opencode.ai/s/1",
+  ],
+  [
+    "diffThread",
+    () => diffThread("t1"),
+    "thread|diff|t1|",
+    "Could not read diff",
+    "src/a.rs: +3 -1\n\n  src/b.rs  \n\n",
+    ["src/a.rs: +3 -1", "src/b.rs"],
+  ],
+  [
+    "listAgents",
+    () => listAgents("t1"),
+    "thread|agents|t1|",
+    "Could not list agents",
+    "build: writes code\nplan: read only",
+    ["build: writes code", "plan: read only"],
+  ],
+  [
+    "listModels",
+    () => listModels("t1"),
+    "thread|models|t1|",
+    "Could not list models",
+    "opencode/glm-5.3",
+    ["opencode/glm-5.3"],
+  ],
+  [
+    "runCommand",
+    () => runCommand("t1", "init", ["--force"]),
+    "thread|command|t1|init|--force|",
+    "Could not run the command",
+    "done",
+    "done",
+  ],
+];
+
+for (const [
+  name,
+  invoke,
+  expected,
+  fallback,
+  out,
+  returns,
+] of stdoutMutations) {
+  test(`${name} invokes the core, returns its stdout and reports failures`, async () => {
+    await control("out", out);
+    expect(await invoke()).toEqual(returns);
+    expect(await calls()).toEqual([expected]);
+
+    await control("out");
+    await control("fail");
+    await expect(invoke()).rejects.toThrow(fallback);
+    await control("out", "from stdout");
+    await expect(invoke()).rejects.toThrow("from stdout");
+    await control("err", "from stderr");
+    await expect(invoke()).rejects.toThrow("from stderr");
+  });
+}
+
+test("forkThread parses the forked thread and reports failures", async () => {
+  await control("out", '{"id":"t2"}');
+  expect(await forkThread("t1")).toEqual({ id: "t2" } as never);
+  expect(await calls()).toEqual(["thread|fork|t1|--json|"]);
+
+  await control("out");
+  await control("fail");
+  await expect(forkThread("t1")).rejects.toThrow("Mitos command failed");
+});
+
+test("setAgent and setModel omit the value when it is null", async () => {
+  await setAgent("t1", "build");
+  await setAgent("t1", null);
+  await setModel("t1", "opencode/glm-5.3");
+  await setModel("t1", null);
+  expect(await calls()).toEqual([
+    "thread|agent|t1|build|",
+    "thread|agent|t1|",
+    "thread|model|t1|opencode/glm-5.3|",
+    "thread|model|t1|",
+  ]);
+});
 
 test("answerRequest sends the decision and any text as flags", async () => {
   await answerRequest("t1", "r1", { decision: Decision.Deny, text: "too big" });

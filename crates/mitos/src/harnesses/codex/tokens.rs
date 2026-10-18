@@ -62,3 +62,43 @@ impl TurnTokens {
         Some(total.minus(baseline))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn malformed_usage_is_ignored_and_counts_never_underflow() {
+        assert!(Counts::of(Some(&json!({ "inputTokens": 1 }))).is_none());
+        assert_eq!(
+            Counts {
+                input: 1,
+                output: 2,
+                cached: 3,
+            }
+            .minus(Counts {
+                input: 2,
+                output: 1,
+                cached: 4,
+            }),
+            Counts {
+                input: 0,
+                output: 1,
+                cached: 0,
+            }
+        );
+
+        let mut tokens = TurnTokens::default();
+        tokens.begin();
+        assert!(tokens.consumed(&json!({ "total": {} })).is_none());
+        assert!(
+            tokens
+                .consumed(&json!({
+                    "total": { "inputTokens": 3, "outputTokens": 2, "cachedInputTokens": 1 }
+                }))
+                .is_none()
+        );
+    }
+}

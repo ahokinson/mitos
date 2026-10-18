@@ -9,7 +9,7 @@ test("detectInstalledHarnesses only returns harnesses Bun.which resolves", () =>
         ? `/usr/bin/${binary}`
         : null,
     ),
-  ).toEqual([KnownHarness.Claude, KnownHarness.OpenCode]);
+  ).toEqual([KnownHarness.OpenCode, KnownHarness.Claude]);
 });
 
 test("detectInstalledHarnesses returns [] when nothing is on PATH", () => {
@@ -20,9 +20,16 @@ test("detectInstalledHarnesses returns every harness when all are on PATH", () =
   expect(
     detectInstalledHarnesses((binary: string) => `/usr/bin/${binary}`),
   ).toEqual([
+    KnownHarness.OpenCode,
     KnownHarness.Claude,
     KnownHarness.Codex,
-    KnownHarness.OpenCode,
     KnownHarness.Hermes,
   ]);
+});
+
+test("OpenCode is preferred when several harnesses are installed", () => {
+  const installed = detectInstalledHarnesses(
+    (binary: string) => `/usr/bin/${binary}`,
+  );
+  expect(installed[0]).toBe(KnownHarness.OpenCode);
 });

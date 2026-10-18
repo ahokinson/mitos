@@ -15,9 +15,16 @@ use nix::poll::{PollFd, PollFlags, poll};
 
 #[cfg(unix)]
 pub fn forward_input(mut writer: Box<dyn Write + Send>, forwarding: &AtomicBool) {
-    use std::os::fd::AsFd;
-
     let stdin = io::stdin();
+    forward_input_from(stdin.lock(), &mut writer, forwarding);
+}
+
+#[cfg(unix)]
+fn forward_input_from(
+    mut stdin: impl Read + std::os::fd::AsFd,
+    writer: &mut dyn Write,
+    forwarding: &AtomicBool,
+) {
     let mut buffer = [0; 4096];
     while forwarding.load(Ordering::Acquire) {
         let mut descriptors = [PollFd::new(stdin.as_fd(), PollFlags::POLLIN)];
@@ -30,7 +37,7 @@ pub fn forward_input(mut writer: Box<dyn Write + Send>, forwarding: &AtomicBool)
         if !ready {
             continue;
         }
-        let Ok(read) = stdin.lock().read(&mut buffer) else {
+        let Ok(read) = stdin.read(&mut buffer) else {
             break;
         };
         if read == 0 || writer.write_all(&buffer[..read]).is_err() {
