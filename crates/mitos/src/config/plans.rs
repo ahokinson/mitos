@@ -190,4 +190,50 @@ mod tests {
         );
         assert_eq!(plan_for(&plans, HarnessKind::Claude, None), None);
     }
+
+    #[test]
+    fn catalog_entries_have_stable_ids_labels_and_go_tiers() {
+        let catalog = [
+            (
+                Plan::OpenCodeGo(GoTier::Go),
+                "opencode-go",
+                "OpenCode Go",
+                Some("go"),
+            ),
+            (
+                Plan::OpenCodeGo(GoTier::Plus),
+                "opencode-go-plus",
+                "OpenCode Go Plus",
+                Some("plus"),
+            ),
+            (Plan::OpenCodeZen, "opencode-zen", "OpenCode Zen", None),
+            (
+                Plan::ChatGpt(ChatGptTier::Plus),
+                "chatgpt-plus",
+                "ChatGPT Plus",
+                None,
+            ),
+            (
+                Plan::ChatGpt(ChatGptTier::Pro),
+                "chatgpt-pro",
+                "ChatGPT Pro",
+                None,
+            ),
+        ];
+
+        for (plan, id, label, tier) in catalog {
+            assert_eq!(plan.id(), id);
+            assert_eq!(plan.label(), label);
+            assert_eq!(plan.go_tier_label(), tier);
+        }
+    }
+
+    #[test]
+    fn malformed_configurations_are_ignored_and_pro_is_supported() {
+        assert!(plans_for(Some("[plans")).is_empty());
+        assert_eq!(
+            plans_for(Some("[plans]\nchatgpt = \"pro\"\n")),
+            [Plan::ChatGpt(ChatGptTier::Pro)]
+        );
+    }
 }

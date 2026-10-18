@@ -121,3 +121,162 @@ impl<H: Harness> HarnessAdapter for H {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::domain::ThreadMode;
+
+    #[derive(Default)]
+    struct FakeHarness {
+        turns: RefCell<Vec<(Option<String>, String, bool)>>,
+    }
+
+    impl Harness for FakeHarness {
+        const PROGRAM: &'static str = "fake";
+
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                headless: true,
+                modes: vec![ThreadMode::Build, ThreadMode::Plan],
+                ask_back: true,
+            }
+        }
+
+        fn launch_args(&self, session: Option<&str>, context: &str) -> Vec<String> {
+            [session.unwrap_or("new"), context]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        }
+
+        fn run_turn(
+            &self,
+            turn: &Turn<'_>,
+            emitter: &mut Emitter<'_, '_>,
+            _answers: Option<&Path>,
+        ) -> Result<()> {
+            self.turns.borrow_mut().push((
+                turn.session.map(str::to_string),
+                turn.text.to_string(),
+                turn.ephemeral,
+            ));
+            emitter.emit(AdapterEvent {
+                native_session: Some(json!("native-session")),
+                ..AdapterEvent::new(kinds::NATIVE_SESSION_UPDATE)
+            })?;
+            emitter.emit(AdapterEvent::new(kinds::TURN_COMPLETE))
+        }
+
+        fn collect(&self, _request: &HandoffRequest) -> Result<CollectedHandoff> {
+            Ok(CollectedHandoff::new(Some(json!("collected")), None, None))
+        }
+    }
+
+    fn workdir() -> PathBuf {
+        PathBuf::from("/workspace")
+    }
+
+    #[test]
+    fn prepares_launches_and_collects_handoffs() {
+        let harness = FakeHarness::default();
+        let request = AdapterRequest::prepare_launch(
+            HarnessKind::Claude,
+            "context".into(),
+            Some(json!("existing")),
+        );
+
+        assert!(harness.negotiate(HarnessKind::Claude).unwrap().ask_back);
+        let launch = harness.prepare_launch(&request).unwrap();
+        assert_eq!(launch.program, "fake");
+        assert_eq!(launch.args, ["existing", "context"]);
+        assert_eq!(launch.native_session, Some(json!("existing")));
+        assert_eq!(
+            harness
+                .collect_handoff(&HandoffRequest::collect(
+                    HarnessKind::Claude,
+                    &workdir(),
+                    "2026-01-01T00:00:00Z".into(),
+                    None,
+                ))
+                .unwrap()
+                .native_session,
+            Some(json!("collected"))
+        );
+        assert_eq!(
+            harness.mine_history(&MiningRequest::new(None, None, 1)),
+            MiningReport::default()
+        );
+    }
+
+    #[test]
+    fn starts_sends_attaches_and_detaches_threads() {
+        let harness = FakeHarness::default();
+        let mut events = Vec::new();
+        let mut sink = |event| {
+            events.push(event);
+            Ok(())
+        };
+        let start = StartThreadRequest::new(
+            HarnessKind::Claude,
+            workdir(),
+            ThreadMode::Plan,
+            "start".into(),
+        )
+        .ephemeral();
+
+        assert_eq!(
+            harness.start_thread(&start, &mut sink, None).unwrap(),
+            Some(json!("native-session"))
+        );
+        let missing = SendMessageRequest::new(
+            HarnessKind::Claude,
+            workdir(),
+            None,
+            ThreadMode::Build,
+            "send".into(),
+        );
+        assert_eq!(
+            harness
+                .send_message(&missing, &mut sink, None)
+                .unwrap_err()
+                .to_string(),
+            "send_message requires a native_session"
+        );
+        let send = SendMessageRequest::new(
+            HarnessKind::Claude,
+            workdir(),
+            Some(json!("existing")),
+            ThreadMode::Build,
+            "send".into(),
+        );
+        harness.send_message(&send, &mut sink, None).unwrap();
+        harness
+            .attach_thread(
+                &AttachThreadRequest::new(HarnessKind::Claude, workdir(), None),
+                &mut sink,
+            )
+            .unwrap();
+        harness
+            .detach_thread(&DetachThreadRequest::new(HarnessKind::Claude))
+            .unwrap();
+
+        assert_eq!(
+            harness.turns.into_inner(),
+            [
+                (None, "start".into(), true),
+                (Some("existing".into()), "send".into(), false)
+            ]
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event.event == kinds::TURN_COMPLETE)
+        );
+    }
+}

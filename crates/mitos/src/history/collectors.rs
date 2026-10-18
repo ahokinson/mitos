@@ -199,6 +199,15 @@ mod tests {
     }
 
     #[test]
+    fn a_candidate_without_messages_is_skipped() {
+        let fixture = Fixture::new(&[json!({ "cwd": "/work" })]);
+
+        let handoff = collect_jsonl_handoff(&search(&fixture, Path::new("/work"), None)).unwrap();
+
+        assert!(handoff.transcript.is_none());
+    }
+
+    #[test]
     fn a_known_session_matches_by_path_regardless_of_workspace_or_age() {
         let fixture = Fixture::new(&lines());
         let session = json!(SESSION);

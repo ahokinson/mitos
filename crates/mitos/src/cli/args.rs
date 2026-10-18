@@ -264,3 +264,39 @@ pub enum ThreadCommand {
         json: bool,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn harness_completion_lists_every_supported_harness() {
+        let candidates = harness_candidates()
+            .candidates()
+            .into_iter()
+            .map(|candidate| candidate.get_value().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            candidates,
+            HarnessKind::ALL
+                .into_iter()
+                .map(|harness| harness.as_str().to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn note_arguments_preserve_each_note_category() {
+        let notes: ThreadNotes = NoteArgs {
+            note: Some("record the outcome".to_string()),
+            decisions: vec!["use SQLite".to_string()],
+            questions: vec!["what is the retention period?".to_string()],
+        }
+        .into();
+
+        assert_eq!(notes.note.as_deref(), Some("record the outcome"));
+        assert_eq!(notes.decisions, ["use SQLite"]);
+        assert_eq!(notes.questions, ["what is the retention period?"]);
+    }
+}

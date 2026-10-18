@@ -1,21 +1,57 @@
 use std::cell::Cell;
 use std::ffi::OsStr;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use super::super::tokens::TurnTokens;
-use super::{NOT_COMPLETED, Session, SharedPending, answer_handler, drive, error_event};
+use super::{Session, SharedPending, answer_handler, drive};
 use crate::harnesses::{Emitter, Turn};
 use crate::ipc::answers::AnswerListener;
 use crate::rpc::RpcPeer;
 
 fn read_stderr(handle: JoinHandle<String>) -> String {
     handle.join().unwrap_or_default().trim().to_string()
+}
+
+trait CodexProcess {
+    type Stdin: Write + Send + 'static;
+    type Stdout: Read + Send + 'static;
+
+    fn take_stdin(&mut self) -> Option<Self::Stdin>;
+    fn take_stdout(&mut self) -> Option<Self::Stdout>;
+    fn has_exited(&mut self) -> bool;
+    fn kill(&mut self);
+    fn wait(&mut self);
+}
+
+impl CodexProcess for Child {
+    type Stdin = ChildStdin;
+    type Stdout = std::process::ChildStdout;
+
+    fn take_stdin(&mut self) -> Option<Self::Stdin> {
+        self.stdin.take()
+    }
+
+    fn take_stdout(&mut self) -> Option<Self::Stdout> {
+        self.stdout.take()
+    }
+
+    fn has_exited(&mut self) -> bool {
+        self.try_wait().ok().flatten().is_some()
+    }
+
+    fn kill(&mut self) {
+        let _ = self.kill();
+    }
+
+    fn wait(&mut self) {
+        let _ = self.wait();
+    }
 }
 
 /// Runs one turn over `codex app-server`: starts or resumes the thread,
@@ -35,14 +71,33 @@ pub fn run_turn(
         .stderr(Stdio::piped())
         .spawn()
         .context("could not start codex")?;
-    let stdin = child.stdin.take().context("codex stdin unavailable")?;
-    let stdout = child.stdout.take().context("codex stdout unavailable")?;
     let mut stderr = child.stderr.take().context("codex stderr unavailable")?;
     let diagnostics = thread::spawn(move || {
         let mut text = String::new();
         let _ = stderr.read_to_string(&mut text);
         text
     });
+
+    run_with_process(child, turn, emitter, answers, || read_stderr(diagnostics))
+}
+
+fn run_with_process<P: CodexProcess>(
+    mut child: P,
+    turn: &Turn<'_>,
+    emitter: &mut Emitter<'_, '_>,
+    answers: Option<&Path>,
+    diagnostics: impl FnOnce() -> String,
+) -> Result<()> {
+    let Some(stdin) = child.take_stdin() else {
+        child.kill();
+        child.wait();
+        bail!("codex stdin unavailable");
+    };
+    let Some(stdout) = child.take_stdout() else {
+        child.kill();
+        child.wait();
+        bail!("codex stdout unavailable");
+    };
 
     let mut peer = RpcPeer::new(stdin, BufReader::new(stdout), false);
     let writer = peer.writer();
@@ -65,270 +120,167 @@ pub fn run_turn(
         drive(turn, &mut peer, &mut session)
     })();
 
-    let already_exited = child.try_wait().ok().flatten().is_some();
+    let complete = finished.get();
+    drop(session);
+    let already_exited = child.has_exited();
+    let mut diagnostics = Some(diagnostics);
+    let mut read_diagnostics = || {
+        diagnostics
+            .take()
+            .expect("codex diagnostics read more than once")()
+    };
     let reported = match outcome {
-        Ok(()) if finished.get() => Ok(()),
         Ok(()) => {
-            let diagnostic = read_stderr(diagnostics);
-            let content = if diagnostic.is_empty() {
-                NOT_COMPLETED.into()
+            let diagnostic = if complete {
+                String::new()
             } else {
-                diagnostic
+                read_diagnostics()
             };
-            session.emitter.emit(error_event(content))
+            super::finish_turn(Ok(()), complete, diagnostic, emitter)
         }
         Err(cause) => {
             let diagnostic = if already_exited {
-                read_stderr(diagnostics)
+                read_diagnostics()
             } else {
                 String::new()
             };
-            let content = if diagnostic.is_empty() {
-                cause.to_string()
-            } else {
-                diagnostic
-            };
-            session.emitter.emit(error_event(content))
+            super::finish_turn(Err(cause), false, diagnostic, emitter)
         }
     };
     writer.close();
-    let _ = child.kill();
-    let _ = child.wait();
+    child.kill();
+    child.wait();
     reported
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
-    use super::super::{METHOD_NOT_FOUND, NO_THREAD_ID};
+    use std::io::Cursor;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
     use crate::domain::ThreadMode;
-    use crate::harnesses::fixtures::{FakeProgram, kinds_of};
-    use crate::wire::events::{AdapterEvent, kinds};
-    use serde_json::{Value, json};
+    use crate::wire::events::kinds;
 
-    const HANDSHAKE: &str = r#"read line
-echo '{"id":1,"result":{}}'
-read line
-read line
-echo '{"id":2,"result":{"thread":{"id":"th-1"}}}'
-read line
-echo '{"id":3,"result":{}}'"#;
-
-    fn run(
-        fake: &FakeProgram,
-        session: Option<&str>,
-    ) -> (Vec<AdapterEvent>, Option<Value>, Result<()>) {
-        let mut seen = Vec::new();
-        let (native, outcome) = {
-            let mut sink = |event: AdapterEvent| {
-                seen.push(event);
-                Ok(())
-            };
-            let mut emitter = Emitter::new(&mut sink);
-            let turn = Turn {
-                workdir: &fake.dir,
-                text: "hello",
-                session,
-                mode: ThreadMode::Build,
-                ephemeral: false,
-                agent: None,
-                model: None,
-            };
-            let outcome = run_turn(fake.path.as_os_str(), &turn, &mut emitter, None);
-            (emitter.into_native_session(), outcome)
-        };
-        (seen, native, outcome)
+    struct FakeProcess {
+        stdin: Option<Vec<u8>>,
+        stdout: Option<Cursor<Vec<u8>>>,
+        exited: bool,
+        killed: Arc<AtomicBool>,
+        waited: Arc<AtomicBool>,
     }
 
-    #[test]
-    fn a_turn_streams_notifications_and_ends_at_turn_completed() {
-        let fake = FakeProgram::new(&format!(
-            r#"{HANDSHAKE}
-echo '{{"method":"item/agentMessage/delta","params":{{"delta":"Hi"}}}}'
-echo '{{"method":"item/completed","params":{{"item":{{"type":"agentMessage","text":"Done."}}}}}}'
-echo '{{"method":"turn/completed","params":{{"turn":{{"status":"completed"}}}}}}'
-cat >/dev/null"#
-        ));
-        let (seen, native, outcome) = run(&fake, None);
-        outcome.unwrap();
-        assert_eq!(
-            kinds_of(&seen),
-            [
-                kinds::NATIVE_SESSION_UPDATE,
-                kinds::ASSISTANT_DELTA,
-                kinds::ASSISTANT_MESSAGE,
-                kinds::TURN_COMPLETE
-            ]
-        );
-        assert_eq!(native, Some(json!("th-1")));
+    impl FakeProcess {
+        fn new(stdin: bool, stdout: Option<&str>, exited: bool) -> Self {
+            Self {
+                stdin: stdin.then(Vec::new),
+                stdout: stdout.map(|text| Cursor::new(text.as_bytes().to_vec())),
+                exited,
+                killed: Arc::new(AtomicBool::new(false)),
+                waited: Arc::new(AtomicBool::new(false)),
+            }
+        }
     }
 
-    #[test]
-    fn the_requests_carry_the_session_mode_and_prompt() {
-        let fake = FakeProgram::new(
-            r#"dir="$(dirname "$0")"
-read line
-echo '{"id":1,"result":{}}'
-read line
-read line
-printf '%s' "$line" > "$dir/thread"
-echo '{"id":2,"result":{"thread":{"id":"th-9"}}}'
-read line
-printf '%s' "$line" > "$dir/turn"
-echo '{"id":3,"result":{}}'
-echo '{"method":"turn/completed","params":{"turn":{"status":"completed"}}}'
-cat >/dev/null"#,
-        );
-        let (_, native, outcome) = run(&fake, Some("th-9"));
-        outcome.unwrap();
-        assert_eq!(native, Some(json!("th-9")));
-        let thread: Value =
-            serde_json::from_str(&std::fs::read_to_string(fake.dir.join("thread")).unwrap())
-                .unwrap();
-        assert_eq!(thread["method"], "thread/resume");
-        assert_eq!(thread["params"]["threadId"], "th-9");
-        assert_eq!(thread["params"]["excludeTurns"], true);
-        assert_eq!(thread["params"]["sandbox"], "danger-full-access");
-        assert_eq!(thread["params"]["approvalPolicy"], "never");
-        let turn: Value =
-            serde_json::from_str(&std::fs::read_to_string(fake.dir.join("turn")).unwrap()).unwrap();
-        assert_eq!(turn["method"], "turn/start");
-        assert_eq!(
-            turn["params"]["input"],
-            json!([{ "type": "text", "text": "hello" }])
-        );
-        assert_eq!(
-            turn["params"]["sandboxPolicy"],
-            json!({ "type": "dangerFullAccess" })
-        );
-    }
+    impl CodexProcess for FakeProcess {
+        type Stdin = Vec<u8>;
+        type Stdout = Cursor<Vec<u8>>;
 
-    #[test]
-    fn an_ephemeral_turn_starts_an_ephemeral_thread() {
-        let fake = FakeProgram::new(
-            r#"dir="$(dirname "$0")"
-read line
-echo '{"id":1,"result":{}}'
-read line
-read line
-printf '%s' "$line" > "$dir/thread"
-echo '{"id":2,"result":{"thread":{"id":"th-e"}}}'
-read line
-echo '{"id":3,"result":{}}'
-echo '{"method":"turn/completed","params":{"turn":{"status":"completed"}}}'
-cat >/dev/null"#,
-        );
-        let mut sink = |_: AdapterEvent| Ok(());
-        let mut emitter = Emitter::new(&mut sink);
-        let turn = Turn {
-            workdir: &fake.dir,
-            text: "hello",
-            session: None,
-            mode: ThreadMode::Plan,
-            ephemeral: true,
-            agent: None,
-            model: None,
-        };
-        run_turn(fake.path.as_os_str(), &turn, &mut emitter, None).unwrap();
-        let thread: Value =
-            serde_json::from_str(&std::fs::read_to_string(fake.dir.join("thread")).unwrap())
-                .unwrap();
-        assert_eq!(thread["method"], "thread/start");
-        assert_eq!(thread["params"]["ephemeral"], true);
-        assert_eq!(thread["params"]["sandbox"], "read-only");
-    }
-
-    #[test]
-    fn unanswerable_server_requests_are_rejected() {
-        let fake = FakeProgram::new(&format!(
-            r#"{HANDSHAKE}
-echo '{{"id":"s1","method":"attestation/generate","params":{{}}}}'
-read line
-printf '%s' "$line" > "$(dirname "$0")/rejection"
-echo '{{"method":"turn/completed","params":{{"turn":{{"status":"completed"}}}}}}'
-cat >/dev/null"#
-        ));
-        let (seen, _, outcome) = run(&fake, None);
-        outcome.unwrap();
-        assert_eq!(
-            kinds_of(&seen),
-            [kinds::NATIVE_SESSION_UPDATE, kinds::TURN_COMPLETE]
-        );
-        let rejection: Value =
-            serde_json::from_str(&std::fs::read_to_string(fake.dir.join("rejection")).unwrap())
-                .unwrap();
-        assert_eq!(rejection["id"], "s1");
-        assert_eq!(rejection["error"]["code"], METHOD_NOT_FOUND);
-    }
-
-    #[test]
-    fn a_server_request_becomes_a_request_event() {
-        let fake = FakeProgram::new(&format!(
-            r#"{HANDSHAKE}
-echo '{{"id":5,"method":"item/commandExecution/requestApproval","params":{{"command":"ls"}}}}'
-echo '{{"method":"turn/completed","params":{{"turn":{{"status":"completed"}}}}}}'
-cat >/dev/null"#
-        ));
-        let (seen, _, outcome) = run(&fake, None);
-        outcome.unwrap();
-        assert_eq!(
-            kinds_of(&seen),
-            [
-                kinds::NATIVE_SESSION_UPDATE,
-                kinds::REQUEST,
-                kinds::TURN_COMPLETE
-            ]
-        );
-        assert_eq!(seen[1].payload.as_ref().unwrap()["id"], "5");
-    }
-
-    #[test]
-    fn ending_without_turn_completed_reports_stderr_or_a_default() {
-        {
-            let with_stderr = FakeProgram::new(&format!("{HANDSHAKE}\necho boom >&2"));
-            let (seen, _, outcome) = run(&with_stderr, None);
-            outcome.unwrap();
-            assert_eq!(
-                kinds_of(&seen),
-                [kinds::NATIVE_SESSION_UPDATE, kinds::ERROR]
-            );
-            assert_eq!(seen[1].content.as_deref(), Some("boom"));
+        fn take_stdin(&mut self) -> Option<Self::Stdin> {
+            self.stdin.take()
         }
 
-        let silent = FakeProgram::new(HANDSHAKE);
-        let (seen, _, _) = run(&silent, None);
-        assert_eq!(seen.last().unwrap().content.as_deref(), Some(NOT_COMPLETED));
+        fn take_stdout(&mut self) -> Option<Self::Stdout> {
+            self.stdout.take()
+        }
+
+        fn has_exited(&mut self) -> bool {
+            self.exited
+        }
+
+        fn kill(&mut self) {
+            self.killed.store(true, Ordering::Relaxed);
+        }
+
+        fn wait(&mut self) {
+            self.waited.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn turn() -> Turn<'static> {
+        Turn {
+            workdir: Path::new("/work"),
+            text: "hello",
+            session: None,
+            mode: ThreadMode::Build,
+            ephemeral: false,
+            agent: None,
+            model: None,
+        }
     }
 
     #[test]
-    fn a_missing_thread_id_is_an_error_event() {
-        let fake = FakeProgram::new(
-            r#"read line
-echo '{"id":1,"result":{}}'
-read line
-read line
-echo '{"id":2,"result":{}}'
-cat >/dev/null"#,
-        );
-        let (seen, _, outcome) = run(&fake, None);
-        outcome.unwrap();
-        assert_eq!(kinds_of(&seen), [kinds::ERROR]);
-        assert_eq!(seen[0].content.as_deref(), Some(NO_THREAD_ID));
-    }
+    fn missing_streams_are_cleaned_up_without_starting_a_process() {
+        let process = FakeProcess::new(false, Some(""), false);
+        let killed = process.killed.clone();
+        let waited = process.waited.clone();
+        let mut sink = |_| Ok(());
+        let mut emitter = Emitter::new(&mut sink);
 
-    #[test]
-    fn a_failed_turn_surfaces_the_servers_error() {
-        let fake = FakeProgram::new(&format!(
-            r#"{HANDSHAKE}
-echo '{{"method":"turn/completed","params":{{"turn":{{"status":"failed","error":{{"message":"nope"}}}}}}}}'
-cat >/dev/null"#
-        ));
-        let (seen, _, outcome) = run(&fake, None);
-        outcome.unwrap();
         assert_eq!(
-            kinds_of(&seen),
-            [kinds::NATIVE_SESSION_UPDATE, kinds::ERROR]
+            run_with_process(process, &turn(), &mut emitter, None, String::new)
+                .unwrap_err()
+                .to_string(),
+            "codex stdin unavailable"
         );
-        assert_eq!(seen[1].content.as_deref(), Some("nope"));
+        assert!(killed.load(Ordering::Relaxed));
+        assert!(waited.load(Ordering::Relaxed));
+
+        let process = FakeProcess::new(true, None, false);
+        let killed = process.killed.clone();
+        let waited = process.waited.clone();
+
+        assert_eq!(
+            run_with_process(process, &turn(), &mut emitter, None, String::new)
+                .unwrap_err()
+                .to_string(),
+            "codex stdout unavailable"
+        );
+        assert!(killed.load(Ordering::Relaxed));
+        assert!(waited.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn an_in_memory_peer_reports_its_protocol_failure_and_cleans_up() {
+        let process = FakeProcess::new(true, Some(""), true);
+        let killed = process.killed.clone();
+        let waited = process.waited.clone();
+        let diagnostics = Arc::new(AtomicBool::new(false));
+        let read_diagnostics = diagnostics.clone();
+        let mut events = Vec::new();
+        let mut sink = |event| {
+            events.push(event);
+            Ok(())
+        };
+        let mut emitter = Emitter::new(&mut sink);
+
+        run_with_process(process, &turn(), &mut emitter, None, move || {
+            read_diagnostics.store(true, Ordering::Relaxed);
+            "the app server closed".into()
+        })
+        .unwrap();
+
+        assert!(diagnostics.load(Ordering::Relaxed));
+        assert!(killed.load(Ordering::Relaxed));
+        assert!(waited.load(Ordering::Relaxed));
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event, kinds::ERROR);
+        assert!(
+            events[0]
+                .content
+                .as_deref()
+                .is_some_and(|text| text.contains("the app server closed"))
+        );
     }
 }

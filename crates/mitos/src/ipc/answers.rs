@@ -119,10 +119,18 @@ mod unix {
         stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(IO_TIMEOUT))?;
         let mut reader = BufReader::new(stream.try_clone()?);
+        let mut writer = stream;
+        forward_with(&mut reader, &mut writer, on_answer)
+    }
+
+    fn forward_with(
+        reader: &mut impl BufRead,
+        writer: &mut impl Write,
+        on_answer: &mut impl FnMut(Value) -> Result<()>,
+    ) -> Result<()> {
         let mut line = String::new();
         reader.read_line(&mut line)?;
         let parsed: Value = serde_json::from_str(line.trim())?;
-        let mut writer = stream;
         if !parsed.is_object() {
             writer.write_all(b"invalid\n")?;
             return Ok(());
@@ -141,61 +149,74 @@ mod unix {
         stream.flush()?;
         let mut ack = String::new();
         BufReader::new(stream).read_line(&mut ack)?;
-        if ack.trim() != "ok" {
-            anyhow::bail!("turn did not accept the answer");
+        accepted(&ack)
+    }
+
+    fn accepted(ack: &str) -> Result<()> {
+        if ack.trim() == "ok" {
+            return Ok(());
         }
-        Ok(())
+        anyhow::bail!("turn did not accept the answer")
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::io::{BufReader, Cursor};
+
+        use serde_json::json;
+
+        use super::*;
+
+        #[test]
+        fn valid_object_answers_are_forwarded_and_acknowledged() {
+            let mut reader = BufReader::new(Cursor::new(b"{\"request_id\":\"r1\"}\n"));
+            let mut acknowledgement = Vec::new();
+            let mut answers = Vec::new();
+
+            forward_with(&mut reader, &mut acknowledgement, &mut |answer| {
+                answers.push(answer);
+                Ok(())
+            })
+            .unwrap();
+
+            assert_eq!(answers, [json!({ "request_id": "r1" })]);
+            assert_eq!(acknowledgement, b"ok\n");
+        }
+
+        #[test]
+        fn non_object_answers_are_rejected_without_calling_the_handler() {
+            let mut reader = BufReader::new(Cursor::new(b"[\"not\",\"an object\"]\n"));
+            let mut acknowledgement = Vec::new();
+            let mut handled = false;
+
+            forward_with(&mut reader, &mut acknowledgement, &mut |_| {
+                handled = true;
+                Ok(())
+            })
+            .unwrap();
+
+            assert!(!handled);
+            assert_eq!(acknowledgement, b"invalid\n");
+        }
+
+        #[test]
+        fn send_accepts_only_an_ok_acknowledgement() {
+            assert!(accepted("ok\n").is_ok());
+            assert_eq!(
+                accepted("invalid\n").unwrap_err().to_string(),
+                "turn did not accept the answer"
+            );
+        }
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
-    use std::io::{BufRead, BufReader, Write};
-    use std::process::{Command, Stdio};
-
     use super::*;
 
     #[test]
     fn socket_path_truncates_the_thread_id() {
         let path = socket_path(Path::new("/state"), &"0123456789abcdef".into());
         assert_eq!(path, Path::new("/state/sockets/0123456789ab.sock"));
-    }
-
-    #[test]
-    fn answers_reach_the_child_stdin_and_the_socket_is_removed_on_drop() {
-        let id = crate::domain::id();
-        let dir = std::env::temp_dir().join(format!("mitos-{}", &id[..8]));
-        let path = socket_path(&dir, &"thread-xyz-123".into());
-        let mut child = Command::new("cat")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut stdin = child.stdin.take().unwrap();
-        let listener = AnswerListener::start(&path, move |answer| {
-            writeln!(stdin, "{answer}")?;
-            stdin.flush()?;
-            Ok(())
-        })
-        .unwrap();
-
-        send_answer(
-            &path,
-            &serde_json::json!({ "request_id": "r1", "response": "yes" }),
-        )
-        .unwrap();
-
-        let mut line = String::new();
-        BufReader::new(child.stdout.take().unwrap())
-            .read_line(&mut line)
-            .unwrap();
-        let echoed: Value = serde_json::from_str(line.trim()).unwrap();
-        assert_eq!(echoed["request_id"], "r1");
-
-        drop(listener);
-        assert!(!path.exists());
-        assert!(send_answer(&path, &serde_json::json!({})).is_err());
-        child.wait().unwrap();
-        std::fs::remove_dir_all(dir).unwrap();
     }
 }

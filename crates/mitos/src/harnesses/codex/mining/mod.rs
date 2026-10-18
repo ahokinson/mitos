@@ -188,6 +188,61 @@ mod tests {
     }
 
     #[test]
+    fn parser_ignores_non_messages_and_invalid_message_shapes() {
+        let request = default_request();
+        assert!(SessionParser::parse(
+            Path::new("missing.jsonl"),
+            "not json\n[]\n{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\"}}",
+            &request,
+        )
+        .is_none());
+
+        let fixture = Fixture::new(
+            "ses_1",
+            &[
+                session_meta(),
+                json!({
+                    "type": "response_item", "timestamp": "2026-01-02T03:04:05Z",
+                    "payload": { "type": "message", "role": "tool" }
+                }),
+                json!({
+                    "type": "response_item", "timestamp": "2026-01-02T04:04:05Z",
+                    "payload": { "type": "message", "role": "user" }
+                }),
+                tool_line("t_1", "local_shell_call", "shell"),
+                json!({ "type": "token_usage_record", "payload": { "usage": {} } }),
+            ],
+        );
+
+        let report = fixture.mine(&request);
+
+        assert_eq!(report.totals.messages_user, 1);
+        assert_eq!(report.totals.tool_calls, 1);
+        assert_eq!(report.tool_usage[0].label, "shell");
+        assert_eq!(report.sessions[0].title, "");
+    }
+
+    #[test]
+    fn a_since_filter_drops_sessions_created_before_the_window() {
+        let fixture = Fixture::new(
+            "ses_1",
+            &[
+                session_meta(),
+                json!({
+                    "type": "response_item", "timestamp": "2020-01-02T03:04:05Z",
+                    "payload": { "type": "message", "role": "user", "content": [] }
+                }),
+            ],
+        );
+        let request = MiningRequest::new(None, Some(1), DEFAULT_TOP);
+
+        assert_eq!(
+            fixture.mine(&request),
+            crate::wire::responses::MiningReport::default()
+        );
+    }
+
+    #[test]
     fn an_empty_sessions_root_mines_nothing() {
         let root = std::env::temp_dir().join(format!("mitos-codex-{}", crate::domain::id()));
         std::fs::create_dir_all(&root).unwrap();

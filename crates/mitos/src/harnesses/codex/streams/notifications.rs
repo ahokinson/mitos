@@ -193,4 +193,19 @@ mod tests {
         assert_eq!(second.input_tokens, Some(6));
         assert_eq!(second.output_tokens, Some(2));
     }
+
+    #[test]
+    fn errors_use_the_fallback_message_and_retries_stay_quiet() {
+        let mut tokens = TurnTokens::default();
+        assert!(
+            process_notification("error", &json!({ "willRetry": true }), &mut tokens).is_empty()
+        );
+
+        let events = process_notification("error", &json!({}), &mut tokens);
+        assert_eq!(
+            events[0].content.as_deref(),
+            Some("Codex reported an error")
+        );
+        assert_eq!(events[0].event, kinds::ERROR);
+    }
 }

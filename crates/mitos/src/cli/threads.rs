@@ -19,10 +19,14 @@ fn opencode_session<'a>(operation: &str, target: &'a NativeTarget) -> Result<&'a
     }
     Ok(&target.session)
 }
-fn abort_turn(service: &ThreadService<'_>, id: &ThreadId) -> Result<()> {
+fn abort_turn(
+    service: &ThreadService<'_>,
+    control: &impl control::Control,
+    id: &ThreadId,
+) -> Result<()> {
     let target = service.native_target(id)?;
     let session = opencode_session("abort", &target)?;
-    control::abort(&target.workdir, session)?;
+    control.abort(&target.workdir, session)?;
     println!("Asked OpenCode to stop the running turn on thread {id}.");
     Ok(())
 }
@@ -76,28 +80,42 @@ fn set_thread_model(
     Ok(())
 }
 
-fn fork_thread(service: &ThreadService<'_>, id: &ThreadId, json: bool) -> Result<()> {
+fn fork_thread(
+    service: &ThreadService<'_>,
+    control: &impl control::Control,
+    id: &ThreadId,
+    json: bool,
+) -> Result<()> {
     let target = service.native_target(id)?;
     let session = opencode_session("fork", &target)?;
-    let child = control::fork(&target.workdir, session)?;
+    let child = control.fork(&target.workdir, session)?;
     let thread = service.new_bound_thread(id, HarnessKind::OpenCode, &Value::String(child))?;
     emit(json, thread, |thread| {
         println!("Forked thread {} from {id}.", thread.id);
     })
 }
 
-fn share_thread(service: &ThreadService<'_>, id: &ThreadId) -> Result<()> {
+fn share_thread(
+    service: &ThreadService<'_>,
+    control: &impl control::Control,
+    id: &ThreadId,
+) -> Result<()> {
     let target = service.native_target(id)?;
     let session = opencode_session("share", &target)?;
-    let url = control::share(&target.workdir, session)?;
+    let url = control.share(&target.workdir, session)?;
     println!("{url}");
     Ok(())
 }
 
-fn show_diff(service: &ThreadService<'_>, id: &ThreadId, json: bool) -> Result<()> {
+fn show_diff(
+    service: &ThreadService<'_>,
+    control: &impl control::Control,
+    id: &ThreadId,
+    json: bool,
+) -> Result<()> {
     let target = service.native_target(id)?;
     let session = opencode_session("diff", &target)?;
-    let diffs = control::diff(&target.workdir, session)?;
+    let diffs = control.diff(&target.workdir, session)?;
     if json {
         println!("{}", serde_json::to_string(&diffs)?);
     } else {
@@ -111,10 +129,14 @@ fn show_diff(service: &ThreadService<'_>, id: &ThreadId, json: bool) -> Result<(
     Ok(())
 }
 
-fn list_agents(service: &ThreadService<'_>, id: &ThreadId) -> Result<()> {
+fn list_agents(
+    service: &ThreadService<'_>,
+    control: &impl control::Control,
+    id: &ThreadId,
+) -> Result<()> {
     let target = service.native_target(id)?;
     opencode_session("agents", &target)?;
-    let agents = control::agents(&target.workdir)?;
+    let agents = control.agents(&target.workdir)?;
     for agent in agents.as_array().into_iter().flatten() {
         let name = agent.get("name").and_then(Value::as_str).unwrap_or("?");
         let description = agent
@@ -126,10 +148,14 @@ fn list_agents(service: &ThreadService<'_>, id: &ThreadId) -> Result<()> {
     Ok(())
 }
 
-fn list_models(service: &ThreadService<'_>, id: &ThreadId) -> Result<()> {
+fn list_models(
+    service: &ThreadService<'_>,
+    control: &impl control::Control,
+    id: &ThreadId,
+) -> Result<()> {
     let target = service.native_target(id)?;
     opencode_session("models", &target)?;
-    let defaults = control::model_defaults(&target.workdir)?;
+    let defaults = control.model_defaults(&target.workdir)?;
     let defaults = defaults
         .get("default")
         .and_then(Value::as_object)
@@ -146,13 +172,14 @@ fn list_models(service: &ThreadService<'_>, id: &ThreadId) -> Result<()> {
 
 fn run_command(
     service: &ThreadService<'_>,
+    control: &impl control::Control,
     id: &ThreadId,
     command: &str,
     arguments: &str,
 ) -> Result<()> {
     let target = service.native_target(id)?;
     let session = opencode_session("command", &target)?;
-    let text = control::run_command(
+    let text = control.run_command(
         &target.workdir,
         session,
         command,
@@ -172,6 +199,15 @@ pub fn dispatch(
     service: &ThreadService<'_>,
     adapter: &Adapters,
     command: ThreadCommand,
+) -> Result<()> {
+    dispatch_with_control(service, adapter, command, &control::ServerControl)
+}
+
+fn dispatch_with_control(
+    service: &ThreadService<'_>,
+    adapter: &Adapters,
+    command: ThreadCommand,
+    control: &impl control::Control,
 ) -> Result<()> {
     match command {
         ThreadCommand::New {
@@ -233,19 +269,19 @@ pub fn dispatch(
             println!("Thread {id} is in {} mode.", mode.as_str());
             Ok(())
         }
-        ThreadCommand::Abort { id } => abort_turn(service, &id),
-        ThreadCommand::Fork { id, json } => fork_thread(service, &id, json),
-        ThreadCommand::Share { id } => share_thread(service, &id),
-        ThreadCommand::Diff { id, json } => show_diff(service, &id, json),
+        ThreadCommand::Abort { id } => abort_turn(service, control, &id),
+        ThreadCommand::Fork { id, json } => fork_thread(service, control, &id, json),
+        ThreadCommand::Share { id } => share_thread(service, control, &id),
+        ThreadCommand::Diff { id, json } => show_diff(service, control, &id, json),
         ThreadCommand::Agent { id, name } => set_thread_agent(service, &id, name),
         ThreadCommand::Model { id, reference } => set_thread_model(service, &id, reference),
-        ThreadCommand::Agents { id } => list_agents(service, &id),
-        ThreadCommand::Models { id } => list_models(service, &id),
+        ThreadCommand::Agents { id } => list_agents(service, control, &id),
+        ThreadCommand::Models { id } => list_models(service, control, &id),
         ThreadCommand::Command {
             id,
             command,
             arguments,
-        } => run_command(service, &id, &command, &arguments.join(" ")),
+        } => run_command(service, control, &id, &command, &arguments.join(" ")),
         ThreadCommand::Answer {
             id,
             request,
@@ -311,128 +347,89 @@ pub fn enter(service: &ThreadService<'_>, adapter: &Adapters, args: EnterArgs) -
     Ok(())
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
-    use std::io::{BufRead, BufReader, Read, Write};
-    use std::net::{TcpListener, TcpStream};
-    use std::path::PathBuf;
-    use std::thread;
+    use std::cell::RefCell;
+    use std::path::{Path, PathBuf};
 
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::*;
-    use crate::domain::HarnessKind;
-    use crate::git::Checkout;
+    use crate::domain::{HarnessKind, RequestKind, Workspace};
     use crate::handoff::DeterministicRenderer;
-    use crate::harnesses::opencode::daemon::{self, ServerAccess};
-    use crate::store::Store;
+    use crate::store::{NewHarnessRequest, Store};
 
-    /// Answers each control endpoint with fixed JSON once authorized, the
-    /// same fake `opencode` server shape `control`'s own tests use.
-    struct FakeServer {
-        _server: thread::JoinHandle<()>,
+    struct FakeControl {
+        defaults: Value,
+        command_output: String,
+        command_fails: bool,
     }
 
-    impl Drop for FakeServer {
-        fn drop(&mut self) {
-            daemon::set_test_server(None);
+    fn fake_control() -> FakeControl {
+        FakeControl {
+            defaults: json!({
+                "default": {},
+                "providers": [{"id": "opencode"}]
+            }),
+            command_output: "done".into(),
+            command_fails: false,
         }
     }
 
-    fn fake_server() -> FakeServer {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let server = thread::spawn(move || {
-            for stream in listener.incoming().map_while(Result::ok) {
-                respond(stream);
-            }
-        });
-        daemon::set_test_server(Some(ServerAccess {
-            base,
-            password: "pw".into(),
-        }));
-        FakeServer { _server: server }
-    }
-
-    fn respond(mut stream: TcpStream) {
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        let mut request_line = String::new();
-        let _ = reader.read_line(&mut request_line);
-        let path = request_line
-            .split_whitespace()
-            .nth(1)
-            .unwrap_or("")
-            .split('?')
-            .next()
-            .unwrap_or("")
-            .to_string();
-        let (mut length, mut authorized) = (0usize, false);
-        loop {
-            let mut header = String::new();
-            if reader.read_line(&mut header).unwrap_or(0) == 0 {
-                break;
-            }
-            let header = header.trim();
-            if header.is_empty() {
-                break;
-            }
-            let lower = header.to_ascii_lowercase();
-            if lower.starts_with("authorization:") {
-                authorized = true;
-            } else if let Some(value) = lower.strip_prefix("content-length:") {
-                length = value.trim().parse().unwrap_or(0);
-            }
+    impl control::Control for FakeControl {
+        fn abort(&self, _workdir: &Path, _session: &str) -> Result<()> {
+            Ok(())
         }
-        let mut body = vec![0; length];
-        let _ = reader.read_exact(&mut body);
-        let answer = if !authorized {
-            ("401 Unauthorized", json!({"error": "unauthorized"}))
-        } else if path.ends_with("/abort") {
-            ("200 OK", json!(true))
-        } else if path.ends_with("/fork") {
-            ("200 OK", json!({"id": "ses_child"}))
-        } else if path.ends_with("/share") {
-            (
-                "200 OK",
-                json!({"id": "ses_1", "share": {"url": "https://s/1"}}),
-            )
-        } else if path.ends_with("/diff") {
-            (
-                "200 OK",
-                json!([{"file": "src/a.rs", "before": "x", "after": "y", "additions": 3, "deletions": 1}]),
-            )
-        } else if path.ends_with("/agent") {
-            (
-                "200 OK",
-                json!([{"name": "build", "description": "writes code", "mode": "primary"}]),
-            )
-        } else if path.ends_with("/command") {
-            (
-                "200 OK",
-                json!({"parts": [{"type": "text", "text": "done"}]}),
-            )
-        } else if path.ends_with("/config/providers") {
-            (
-                "200 OK",
-                json!({"default": {"opencode": "glm-5.3"}, "providers": [{"id": "opencode"}]}),
-            )
-        } else {
-            ("404 Not Found", json!({"error": "unknown"}))
-        };
-        let payload = answer.1.to_string();
-        let _ = write!(
-            stream,
-            "HTTP/1.1 {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-            answer.0,
-            payload.len(),
-            payload
-        );
-        let _ = stream.flush();
+
+        fn fork(&self, _workdir: &Path, _session: &str) -> Result<String> {
+            Ok("ses_child".into())
+        }
+
+        fn share(&self, _workdir: &Path, _session: &str) -> Result<String> {
+            Ok("https://s/1".into())
+        }
+
+        fn diff(&self, _workdir: &Path, _session: &str) -> Result<Value> {
+            Ok(json!([{
+                "file": "src/a.rs",
+                "before": "x",
+                "after": "y",
+                "additions": 3,
+                "deletions": 1
+            }]))
+        }
+
+        fn agents(&self, _workdir: &Path) -> Result<Value> {
+            Ok(json!([{
+                "name": "build",
+                "description": "writes code",
+                "mode": "primary"
+            }]))
+        }
+
+        fn model_defaults(&self, _workdir: &Path) -> Result<Value> {
+            Ok(self.defaults.clone())
+        }
+
+        fn run_command(
+            &self,
+            _workdir: &Path,
+            _session: &str,
+            _command: &str,
+            _arguments: &str,
+            _agent: Option<&str>,
+            _model: Option<&str>,
+        ) -> Result<String> {
+            if self.command_fails {
+                bail!("the command failed");
+            }
+            Ok(self.command_output.clone())
+        }
     }
 
     struct Rig {
         root: PathBuf,
-        workspace: PathBuf,
+        workspace: Workspace,
         store: Store,
         renderer: DeterministicRenderer,
     }
@@ -445,9 +442,12 @@ mod tests {
 
     fn rig() -> Rig {
         let root = std::env::temp_dir().join(format!("mitos-cli-threads-{}", crate::domain::id()));
-        let workspace = root.join("workspace");
-        std::fs::create_dir_all(&workspace).unwrap();
         let store = Store::new(Some(root.clone())).unwrap();
+        let workspace_root = root.join("workspace");
+        std::fs::create_dir_all(&workspace_root).unwrap();
+        let workspace = store
+            .workspace_for(&workspace_root, None, "workspace")
+            .unwrap();
         Rig {
             root,
             workspace,
@@ -462,12 +462,7 @@ mod tests {
         }
 
         fn bound_thread(&self, harness: HarnessKind, session: &str) -> ThreadId {
-            let checkout = Checkout::open(&self.workspace).unwrap();
-            let workspace = self
-                .store
-                .workspace_for(checkout.root(), checkout.git_dir(), &checkout.key())
-                .unwrap();
-            let thread = self.store.create_thread(&workspace.id).unwrap();
+            let thread = self.store.create_thread(&self.workspace.id).unwrap();
             self.store
                 .set_thread_harness(&thread.id, Some(harness), Some(&json!(session)))
                 .unwrap();
@@ -475,69 +470,54 @@ mod tests {
         }
 
         fn thread_count(&self) -> usize {
-            let checkout = Checkout::open(&self.workspace).unwrap();
-            let workspace = self
-                .store
-                .workspace_for(checkout.root(), checkout.git_dir(), &checkout.key())
-                .unwrap();
-            self.store.list_threads(&workspace.id).unwrap().len()
+            self.store.list_threads(&self.workspace.id).unwrap().len()
         }
     }
 
     #[test]
-    fn opencode_control_commands_run_against_the_shared_server() {
-        let _fake = fake_server();
+    fn opencode_control_commands_use_the_control_api() {
+        let control = fake_control();
         let rig = rig();
         let id = rig.bound_thread(HarnessKind::OpenCode, "ses_1");
 
-        assert!(abort_turn(&rig.service(), &id).is_ok());
-        assert!(fork_thread(&rig.service(), &id, true).is_ok());
-        assert!(share_thread(&rig.service(), &id).is_ok());
-        assert!(show_diff(&rig.service(), &id, false).is_ok());
-        assert!(list_agents(&rig.service(), &id).is_ok());
-        assert!(list_models(&rig.service(), &id).is_ok());
-        assert!(run_command(&rig.service(), &id, "init", "--force").is_ok());
+        assert!(abort_turn(&rig.service(), &control, &id).is_ok());
+        assert!(fork_thread(&rig.service(), &control, &id, true).is_ok());
+        assert!(share_thread(&rig.service(), &control, &id).is_ok());
+        assert!(show_diff(&rig.service(), &control, &id, false).is_ok());
+        assert!(show_diff(&rig.service(), &control, &id, true).is_ok());
+        assert!(list_agents(&rig.service(), &control, &id).is_ok());
+        assert!(list_models(&rig.service(), &control, &id).is_ok());
+        assert!(run_command(&rig.service(), &control, &id, "init", "--force").is_ok());
     }
 
     #[test]
     fn only_opencode_threads_take_control_commands() {
-        let _fake = fake_server();
+        let control = fake_control();
         let rig = rig();
         let id = rig.bound_thread(HarnessKind::Claude, "s-1");
 
-        let refused = fork_thread(&rig.service(), &id, false).unwrap_err();
+        let refused = fork_thread(&rig.service(), &control, &id, false).unwrap_err();
         assert!(refused.to_string().contains("only OpenCode threads"));
     }
 
     #[test]
     fn forking_binds_the_child_session_as_a_new_thread() {
-        let _fake = fake_server();
+        let control = fake_control();
         let rig = rig();
         let id = rig.bound_thread(HarnessKind::OpenCode, "ses_1");
         assert_eq!(rig.thread_count(), 1);
 
-        fork_thread(&rig.service(), &id, false).unwrap();
+        fork_thread(&rig.service(), &control, &id, false).unwrap();
         assert_eq!(rig.thread_count(), 2);
     }
 
     #[test]
-    fn sync_list_and_requests_print_both_shapes() {
+    fn sync_and_requests_print_both_shapes() {
         let rig = rig();
         let id = rig.bound_thread(HarnessKind::OpenCode, "ses_1");
 
         assert!(sync(&rig.service(), &id, 0, true).is_ok());
         assert!(sync(&rig.service(), &id, 0, false).is_ok());
-        assert!(
-            dispatch(
-                &rig.service(),
-                &Adapters,
-                ThreadCommand::List {
-                    workspace: rig.workspace.clone(),
-                    json: false,
-                },
-            )
-            .is_ok()
-        );
         assert!(
             dispatch(
                 &rig.service(),
@@ -560,5 +540,209 @@ mod tests {
         assert!(set_thread_agent(&rig.service(), &id, None).is_ok());
         assert!(set_thread_model(&rig.service(), &id, Some("opencode/glm-5.3".into())).is_ok());
         assert!(set_thread_model(&rig.service(), &id, None).is_ok());
+    }
+
+    #[test]
+    fn reply_flags_produce_denials_and_reject_empty_replies() {
+        assert_eq!(
+            reply_from(false, true, Some("not now".into())).unwrap(),
+            Reply::Deny(Some("not now".into()))
+        );
+        assert!(reply_from(false, false, None).is_err());
+    }
+
+    #[test]
+    fn dispatches_thread_creation_listing_and_pending_requests() {
+        let rig = rig();
+        let default_control = fake_control();
+        let workspace = rig.root.join("new-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        dispatch_with_control(
+            &rig.service(),
+            &Adapters,
+            ThreadCommand::New {
+                harness: Some(HarnessKind::Claude),
+                workspace: workspace.clone(),
+                json: false,
+            },
+            &default_control,
+        )
+        .unwrap();
+        dispatch_with_control(
+            &rig.service(),
+            &Adapters,
+            ThreadCommand::List {
+                workspace,
+                json: false,
+            },
+            &default_control,
+        )
+        .unwrap();
+
+        let id = rig.bound_thread(HarnessKind::OpenCode, "ses_1");
+        let request = rig
+            .store
+            .open_request(NewHarnessRequest {
+                thread_id: id.clone(),
+                turn_id: None,
+                harness: Some(HarnessKind::OpenCode),
+                kind: RequestKind::Question,
+                payload: Some(json!({ "id": "ask_1" })),
+            })
+            .unwrap();
+        dispatch_with_control(
+            &rig.service(),
+            &Adapters,
+            ThreadCommand::Requests {
+                id: id.clone(),
+                json: false,
+            },
+            &default_control,
+        )
+        .unwrap();
+        assert_eq!(request.thread_id, id);
+    }
+
+    #[test]
+    fn dispatches_opencode_control_commands() {
+        let rig = rig();
+        let default_control = fake_control();
+        let id = rig.bound_thread(HarnessKind::OpenCode, "ses_1");
+
+        for command in [
+            ThreadCommand::Abort { id: id.clone() },
+            ThreadCommand::Fork {
+                id: id.clone(),
+                json: false,
+            },
+            ThreadCommand::Share { id: id.clone() },
+            ThreadCommand::Diff {
+                id: id.clone(),
+                json: false,
+            },
+            ThreadCommand::Diff {
+                id: id.clone(),
+                json: true,
+            },
+            ThreadCommand::Agents { id: id.clone() },
+        ] {
+            dispatch_with_control(&rig.service(), &Adapters, command, &default_control).unwrap();
+        }
+
+        let configured_control = FakeControl {
+            defaults: json!({ "default": { "opencode": "gpt-5" } }),
+            command_output: String::new(),
+            command_fails: false,
+        };
+        dispatch_with_control(
+            &rig.service(),
+            &Adapters,
+            ThreadCommand::Models { id: id.clone() },
+            &configured_control,
+        )
+        .unwrap();
+        dispatch_with_control(
+            &rig.service(),
+            &Adapters,
+            ThreadCommand::Command {
+                id: id.clone(),
+                command: "init".into(),
+                arguments: vec!["--force".into()],
+            },
+            &configured_control,
+        )
+        .unwrap();
+
+        let failing_control = FakeControl {
+            command_fails: true,
+            ..fake_control()
+        };
+        let error = dispatch_with_control(
+            &rig.service(),
+            &Adapters,
+            ThreadCommand::Command {
+                id: id.clone(),
+                command: "init".into(),
+                arguments: Vec::new(),
+            },
+            &failing_control,
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "the command failed");
+    }
+
+    #[test]
+    fn answers_pending_requests_without_a_socket() {
+        let rig = rig();
+        let id = rig.bound_thread(HarnessKind::OpenCode, "ses_1");
+        let question = rig
+            .store
+            .open_request(NewHarnessRequest {
+                thread_id: id.clone(),
+                turn_id: None,
+                harness: Some(HarnessKind::OpenCode),
+                kind: RequestKind::Question,
+                payload: Some(json!({ "id": "ask_1" })),
+            })
+            .unwrap();
+        let permission = rig
+            .store
+            .open_request(NewHarnessRequest {
+                thread_id: id.clone(),
+                turn_id: None,
+                harness: Some(HarnessKind::OpenCode),
+                kind: RequestKind::Permission,
+                payload: Some(json!({ "id": "allow_1" })),
+            })
+            .unwrap();
+        let raw = rig
+            .store
+            .open_request(NewHarnessRequest {
+                thread_id: id.clone(),
+                turn_id: None,
+                harness: Some(HarnessKind::OpenCode),
+                kind: RequestKind::Permission,
+                payload: Some(json!({ "id": "raw_1" })),
+            })
+            .unwrap();
+        let delivered = RefCell::new(Vec::new());
+        let deliver = |_: &Path, line: &Value| {
+            delivered.borrow_mut().push(line.clone());
+            Ok(())
+        };
+        let service = ThreadService::with_answer_delivery(&rig.store, &rig.renderer, &deliver);
+
+        answer_request(
+            &service,
+            &id,
+            &question.id,
+            false,
+            false,
+            Some("blue".into()),
+            None,
+        )
+        .unwrap();
+        answer_request(&service, &id, &permission.id, true, false, None, None).unwrap();
+        answer_request(
+            &service,
+            &id,
+            &raw.id,
+            false,
+            false,
+            None,
+            Some("plain response".into()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            *delivered.borrow(),
+            [
+                json!({ "action": "answer", "request_id": "ask_1", "response": { "answer": "blue" } }),
+                json!({ "action": "answer", "request_id": "allow_1", "response": { "allow": true } }),
+                json!({ "action": "answer", "request_id": "raw_1", "response": "plain response" }),
+            ]
+        );
+        assert!(service.pending_requests(&id).unwrap().is_empty());
     }
 }

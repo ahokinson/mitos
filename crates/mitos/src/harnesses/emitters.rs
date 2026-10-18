@@ -50,3 +50,51 @@ impl<'a, 'b> Emitter<'a, 'b> {
         self.native_session
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::wire::events::kinds;
+
+    #[test]
+    fn records_the_latest_native_session_and_drops_events_after_completion() {
+        let mut events = Vec::new();
+        let mut sink = |event| {
+            events.push(event);
+            Ok(())
+        };
+        let mut emitter = Emitter::new(&mut sink);
+
+        emitter
+            .emit(AdapterEvent {
+                native_session: Some(json!("session-1")),
+                ..AdapterEvent::new(kinds::NATIVE_SESSION_UPDATE)
+            })
+            .unwrap();
+        emitter
+            .emit(AdapterEvent::new(kinds::TURN_COMPLETE))
+            .unwrap();
+        emitter.emit(AdapterEvent::new(kinds::STATUS)).unwrap();
+
+        assert_eq!(emitter.native_session(), Some(&json!("session-1")));
+        assert_eq!(emitter.into_native_session(), Some(json!("session-1")));
+        assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn collect_returns_the_session_from_a_successful_turn() {
+        let mut sink = |_| Ok(());
+
+        let session = Emitter::collect(&mut sink, |emitter| {
+            emitter.emit(AdapterEvent {
+                native_session: Some(json!("session-2")),
+                ..AdapterEvent::new(kinds::NATIVE_SESSION_UPDATE)
+            })
+        })
+        .unwrap();
+
+        assert_eq!(session, Some(json!("session-2")));
+    }
+}

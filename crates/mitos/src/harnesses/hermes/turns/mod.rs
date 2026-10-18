@@ -213,100 +213,73 @@ pub fn drive_turn(
     })
 }
 
-#[cfg(all(test, unix))]
-#[allow(clippy::needless_pass_by_value)]
+#[cfg(test)]
 mod tests {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
+    use std::io::{Cursor, Write};
     use std::path::Path;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::thread;
-    use std::time::Duration;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::domain::ThreadMode;
-    use crate::harnesses::fixtures::kinds_of;
+    use crate::wire::events::AdapterEvent;
 
     const SESSION: &str = "sess-1";
 
-    type Sent = Arc<Mutex<Vec<Value>>>;
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
 
-    #[derive(Clone)]
-    struct Agent {
-        sent: Sent,
-        out: Arc<Mutex<UnixStream>>,
+    impl Write for Captured {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
-    impl Agent {
-        fn push(&self, message: Value) {
-            let mut out = self.out.lock().unwrap();
-            let _ = writeln!(out, "{message}");
-        }
-
-        fn close(&self) {
-            let _ = self.out.lock().unwrap().shutdown(std::net::Shutdown::Both);
-        }
-
-        fn methods(&self) -> Vec<String> {
-            self.sent
-                .lock()
+    impl Captured {
+        fn messages(&self) -> Vec<Value> {
+            String::from_utf8(self.0.lock().unwrap().clone())
                 .unwrap()
-                .iter()
-                .filter_map(|message| message["method"].as_str().map(str::to_string))
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
                 .collect()
         }
-
-        fn find(&self, predicate: impl Fn(&Value) -> bool) -> Option<Value> {
-            self.sent
-                .lock()
-                .unwrap()
-                .iter()
-                .find(|m| predicate(m))
-                .cloned()
-        }
-
-        /// The agent reads on its own thread, so what the client just wrote may
-        /// not be recorded yet.
-        fn wait_for(&self, predicate: impl Fn(&Value) -> bool) -> Option<Value> {
-            for _ in 0..400 {
-                if let Some(found) = self.find(&predicate) {
-                    return Some(found);
-                }
-                thread::sleep(Duration::from_millis(5));
-            }
-            None
-        }
     }
 
-    /// A scripted ACP agent: `respond` sees each client message and returns the
-    /// lines the agent sends back.
-    fn fake_agent(
-        respond: impl Fn(&Value, &Agent) -> Vec<Value> + Send + 'static,
-    ) -> (RpcPeer, Agent) {
-        let (client, agent_end) = UnixStream::pair().unwrap();
-        let peer = RpcPeer::new(client.try_clone().unwrap(), BufReader::new(client), true);
-        let agent = Agent {
-            sent: Sent::default(),
-            out: Arc::new(Mutex::new(agent_end.try_clone().unwrap())),
-        };
-        let handle = agent.clone();
-        thread::spawn(move || {
-            for line in BufReader::new(agent_end).lines().map_while(Result::ok) {
-                let message: Value = serde_json::from_str(&line).unwrap();
-                handle.sent.lock().unwrap().push(message.clone());
-                for reply in respond(&message, &handle) {
-                    handle.push(reply);
-                }
-            }
-        });
-        (peer, agent)
+    fn kinds_of(events: &[AdapterEvent]) -> Vec<&str> {
+        events.iter().map(|event| event.event.as_str()).collect()
     }
 
-    fn result(message: &Value, value: Value) -> Value {
-        json!({ "jsonrpc": "2.0", "id": message["id"], "result": value })
+    fn peer(script: Vec<Value>) -> (RpcPeer, Captured) {
+        let input = script
+            .into_iter()
+            .map(|message| serde_json::to_string(&message).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes();
+        let captured = Captured::default();
+        (
+            RpcPeer::new(captured.clone(), Cursor::new(input), true),
+            captured,
+        )
     }
 
-    fn notification(update: Value) -> Value {
+    fn result(id: i64, value: impl serde::Serialize) -> Value {
+        json!({ "jsonrpc": "2.0", "id": id, "result": value })
+    }
+
+    fn methods(captured: &Captured) -> Vec<String> {
+        captured
+            .messages()
+            .iter()
+            .filter_map(|message| message["method"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    fn notification(update: impl serde::Serialize) -> Value {
         json!({ "jsonrpc": "2.0", "method": "session/update", "params": { "sessionId": SESSION, "update": update } })
     }
 
@@ -314,19 +287,16 @@ mod tests {
         json!({ "protocolVersion": 1, "agentCapabilities": { "loadSession": true, "sessionCapabilities": { "resume": {} } } })
     }
 
-    fn standard(message: &Value, agent: &Agent) -> Vec<Value> {
-        match message["method"].as_str() {
-            Some("initialize") => vec![result(message, capabilities())],
-            Some("session/new") => vec![result(message, json!({ "sessionId": SESSION }))],
-            Some("session/prompt") => {
-                agent.push(notification(json!({
-                    "sessionUpdate": "agent_message_chunk",
-                    "content": { "type": "text", "text": "Hi there" }
-                })));
-                vec![result(message, json!({ "stopReason": "end_turn" }))]
-            }
-            _ => Vec::new(),
-        }
+    fn standard_turn() -> Vec<Value> {
+        vec![
+            result(1, capabilities()),
+            result(2, json!({ "sessionId": SESSION })),
+            notification(json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "type": "text", "text": "Hi there" }
+            })),
+            result(3, json!({ "stopReason": "end_turn" })),
+        ]
     }
 
     fn drive(
@@ -334,10 +304,12 @@ mod tests {
         session: Option<&str>,
         pending: &SharedPending,
         diagnostic: &dyn Fn() -> String,
+        on_event: &mut dyn FnMut(&AdapterEvent) -> Result<()>,
     ) -> Vec<AdapterEvent> {
         let mut seen = Vec::new();
         {
             let mut sink = |event: AdapterEvent| {
+                on_event(&event)?;
                 seen.push(event);
                 Ok(())
             };
@@ -357,12 +329,13 @@ mod tests {
     }
 
     fn run_plain(peer: &mut RpcPeer, session: Option<&str>) -> Vec<AdapterEvent> {
-        drive(peer, session, &SharedPending::default(), &String::new)
+        let pending = SharedPending::default();
+        drive(peer, session, &pending, &String::new, &mut |_| Ok(()))
     }
 
     #[test]
     fn a_new_session_streams_a_turn_and_ends_with_one_turn_complete() {
-        let (mut peer, agent) = fake_agent(standard);
+        let (mut peer, captured) = peer(standard_turn());
         let events = run_plain(&mut peer, None);
         assert_eq!(
             kinds_of(&events),
@@ -374,7 +347,7 @@ mod tests {
             ]
         );
         assert_eq!(events[0].native_session, Some(json!(SESSION)));
-        let sent = agent.sent.lock().unwrap().clone();
+        let sent = captured.messages();
         assert_eq!(sent[0]["jsonrpc"], "2.0");
         assert_eq!(sent[0]["method"], "initialize");
         assert_eq!(sent[0]["params"]["protocolVersion"], 1);
@@ -392,16 +365,18 @@ mod tests {
 
     #[test]
     fn an_existing_session_is_resumed_without_creating_one() {
-        let (mut peer, agent) = fake_agent(|message, agent| {
-            if message["method"] == "session/resume" {
-                vec![result(message, Value::Null)]
-            } else {
-                standard(message, agent)
-            }
-        });
+        let (mut peer, captured) = peer(vec![
+            result(1, capabilities()),
+            result(2, Value::Null),
+            notification(json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "type": "text", "text": "Hi there" }
+            })),
+            result(3, json!({ "stopReason": "end_turn" })),
+        ]);
         let events = run_plain(&mut peer, Some(SESSION));
         assert_eq!(events.last().unwrap().event, kinds::TURN_COMPLETE);
-        let methods = agent.methods();
+        let methods = methods(&captured);
         assert!(methods.contains(&"session/resume".to_string()));
         assert!(!methods.contains(&"session/new".to_string()));
         assert!(!methods.contains(&"session/load".to_string()));
@@ -409,22 +384,24 @@ mod tests {
 
     #[test]
     fn load_replay_is_not_part_of_the_turn_when_only_session_load_exists() {
-        let (mut peer, agent) = fake_agent(|message, agent| match message["method"].as_str() {
-            Some("initialize") => vec![result(
-                message,
+        let (mut peer, captured) = peer(vec![
+            result(
+                1,
                 json!({ "protocolVersion": 1, "agentCapabilities": { "loadSession": true } }),
-            )],
-            Some("session/load") => {
-                agent.push(notification(json!({
-                    "sessionUpdate": "agent_message_chunk",
-                    "content": { "type": "text", "text": "old history" }
-                })));
-                vec![result(message, Value::Null)]
-            }
-            _ => standard(message, agent),
-        });
+            ),
+            notification(json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "type": "text", "text": "old history" }
+            })),
+            result(2, Value::Null),
+            notification(json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "type": "text", "text": "Hi there" }
+            })),
+            result(3, json!({ "stopReason": "end_turn" })),
+        ]);
         let events = run_plain(&mut peer, Some(SESSION));
-        assert!(agent.methods().contains(&"session/load".to_string()));
+        assert!(methods(&captured).contains(&"session/load".to_string()));
         assert!(
             events
                 .iter()
@@ -435,16 +412,10 @@ mod tests {
 
     #[test]
     fn an_agent_that_cannot_resume_is_reported_as_an_error() {
-        let (mut peer, _) = fake_agent(|message, _| {
-            if message["method"] == "initialize" {
-                vec![result(
-                    message,
-                    json!({ "protocolVersion": 1, "agentCapabilities": {} }),
-                )]
-            } else {
-                Vec::new()
-            }
-        });
+        let (mut peer, _) = peer(vec![result(
+            1,
+            json!({ "protocolVersion": 1, "agentCapabilities": {} }),
+        )]);
         let events = run_plain(&mut peer, Some(SESSION));
         assert_eq!(kinds_of(&events), [kinds::ERROR]);
         assert_eq!(
@@ -455,11 +426,10 @@ mod tests {
 
     #[test]
     fn a_permission_request_is_answered_with_the_chosen_option() {
-        let (mut peer, agent) = fake_agent(|message, agent| {
-            if message["method"] != "session/prompt" {
-                return standard(message, agent);
-            }
-            agent.push(json!({
+        let (mut peer, captured) = peer(vec![
+            result(1, capabilities()),
+            result(2, json!({ "sessionId": SESSION })),
+            json!({
                 "jsonrpc": "2.0",
                 "id": 9,
                 "method": "session/request_permission",
@@ -471,42 +441,27 @@ mod tests {
                         { "optionId": "ro", "name": "Reject", "kind": "reject_once" }
                     ]
                 }
-            }));
-            let waiting = agent.clone();
-            let prompt = message.clone();
-            thread::spawn(move || {
-                while waiting
-                    .find(|m| m["id"] == 9 && m.get("result").is_some())
-                    .is_none()
-                {
-                    thread::sleep(Duration::from_millis(5));
-                }
-                waiting.push(result(&prompt, json!({ "stopReason": "end_turn" })));
-            });
-            Vec::new()
-        });
+            }),
+            result(3, json!({ "stopReason": "end_turn" })),
+        ]);
         let pending = SharedPending::default();
-        let answering = {
-            let pending = pending.clone();
-            let writer = peer.writer();
-            thread::spawn(move || {
-                while !pending.lock().unwrap().contains_key("9") {
-                    thread::sleep(Duration::from_millis(5));
-                }
-                answer_handler(writer, pending)(json!({
+        let mut answer = answer_handler(peer.writer(), pending.clone());
+        let events = drive(&mut peer, None, &pending, &String::new, &mut |event| {
+            if event.event == kinds::REQUEST {
+                answer(json!({
                     "action": "answer",
                     "request_id": "9",
                     "response": { "allow": true }
-                }))
-                .unwrap();
-            })
-        };
-        let events = drive(&mut peer, None, &pending, &String::new);
-        answering.join().unwrap();
+                }))?;
+            }
+            Ok(())
+        });
         assert!(kinds_of(&events).contains(&kinds::REQUEST));
         assert_eq!(events.last().unwrap().event, kinds::TURN_COMPLETE);
-        let reply = agent
-            .wait_for(|m| m["id"] == 9 && m.get("result").is_some())
+        let reply = captured
+            .messages()
+            .into_iter()
+            .find(|message| message["id"] == 9 && message.get("result").is_some())
             .unwrap();
         assert_eq!(
             reply["result"],
@@ -516,40 +471,40 @@ mod tests {
 
     #[test]
     fn an_unknown_agent_request_is_rejected() {
-        let (mut peer, agent) = fake_agent(|message, agent| {
-            if message["method"] == "session/prompt" {
-                agent.push(json!({
-                    "jsonrpc": "2.0",
-                    "id": 5,
-                    "method": "fs/read_text_file",
-                    "params": { "sessionId": SESSION, "path": "/etc/passwd" }
-                }));
-            }
-            standard(message, agent)
-        });
+        let (mut peer, captured) = peer(vec![
+            result(1, capabilities()),
+            result(2, json!({ "sessionId": SESSION })),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "fs/read_text_file",
+                "params": { "sessionId": SESSION, "path": "/etc/passwd" }
+            }),
+            result(3, json!({ "stopReason": "end_turn" })),
+        ]);
         run_plain(&mut peer, None);
-        let rejection = agent
-            .wait_for(|m| m["id"] == 5 && m.get("error").is_some())
+        let rejection = captured
+            .messages()
+            .into_iter()
+            .find(|message| message["id"] == 5 && message.get("error").is_some())
             .unwrap();
         assert_eq!(rejection["error"]["code"], METHOD_NOT_FOUND);
     }
 
     #[test]
     fn an_rpc_error_is_the_single_terminal_error_with_the_servers_details() {
-        let (mut peer, _) = fake_agent(|message, _| {
-            if message["method"] == "initialize" {
-                return vec![result(message, capabilities())];
-            }
-            vec![json!({
+        let (mut peer, _) = peer(vec![
+            result(1, capabilities()),
+            json!({
                 "jsonrpc": "2.0",
-                "id": message["id"],
+                "id": 2,
                 "error": {
                     "code": -32603,
                     "message": "Internal error",
                     "data": { "details": "No LLM provider configured" }
                 }
-            })]
-        });
+            }),
+        ]);
         let events = run_plain(&mut peer, None);
         let terminal: Vec<_> = events
             .iter()
@@ -563,48 +518,41 @@ mod tests {
     }
 
     #[test]
-    fn a_process_that_exits_mid_turn_reports_why_from_its_diagnostic() {
-        let closed = Arc::new(AtomicBool::new(false));
-        let flag = closed.clone();
-        let (mut peer, _) = fake_agent(move |message, agent| {
-            if message["method"] == "session/prompt" {
-                flag.store(true, Ordering::SeqCst);
-                agent.close();
-                return Vec::new();
-            }
-            standard(message, agent)
-        });
-        let events = drive(&mut peer, None, &SharedPending::default(), &|| {
-            "ERROR boom".to_string()
-        });
-        assert!(closed.load(Ordering::SeqCst));
+    fn a_peer_that_exits_mid_turn_reports_its_diagnostic() {
+        let (mut exited_peer, _) = peer(vec![
+            result(1, capabilities()),
+            result(2, json!({ "sessionId": SESSION })),
+        ]);
+        let pending = SharedPending::default();
+        let events = drive(
+            &mut exited_peer,
+            None,
+            &pending,
+            &|| "ERROR boom".to_string(),
+            &mut |_| Ok(()),
+        );
         assert_eq!(events.last().unwrap().event, kinds::ERROR);
         assert_eq!(
             events.last().unwrap().content.as_deref(),
             Some("hermes acp exited: ERROR boom")
         );
 
-        let (mut silent, quiet) = fake_agent(|message, agent| {
-            if message["method"] == "session/prompt" {
-                agent.close();
-                return Vec::new();
-            }
-            standard(message, agent)
-        });
+        let (mut silent, quiet) = peer(vec![
+            result(1, capabilities()),
+            result(2, json!({ "sessionId": SESSION })),
+        ]);
         let events = run_plain(&mut silent, None);
         assert_eq!(events.last().unwrap().content.as_deref(), Some(EXITED));
-        assert_ne!(quiet.methods(), Vec::<String>::new());
+        assert_ne!(methods(&quiet), Vec::<String>::new());
     }
 
     #[test]
     fn a_stop_reason_other_than_end_turn_is_an_error() {
-        let (mut peer, _) = fake_agent(|message, agent| {
-            if message["method"] == "session/prompt" {
-                vec![result(message, json!({ "stopReason": "refusal" }))]
-            } else {
-                standard(message, agent)
-            }
-        });
+        let (mut peer, _) = peer(vec![
+            result(1, capabilities()),
+            result(2, json!({ "sessionId": SESSION })),
+            result(3, json!({ "stopReason": "refusal" })),
+        ]);
         let events = run_plain(&mut peer, None);
         assert_eq!(events.last().unwrap().event, kinds::ERROR);
         assert_eq!(

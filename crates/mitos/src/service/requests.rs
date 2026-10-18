@@ -56,7 +56,7 @@ impl ThreadService<'_> {
             "response": response,
         });
         let socket = answers::socket_path(self.store.config_root(), thread_id);
-        if let Err(error) = answers::send_answer(&socket, &line) {
+        if let Err(error) = (self.answer_delivery)(&socket, &line) {
             self.store.cancel_pending_requests(thread_id)?;
             return Err(
                 error.context("the turn that asked is no longer running; request cancelled")

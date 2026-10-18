@@ -86,7 +86,7 @@ pub fn run() -> Result<()> {
     let service = ThreadService::new(&store, &renderer);
     let adapter = Adapters;
     match cli.command {
-        None => launchers::launch_tui(tui_state_dir),
+        None => launchers::launch_tui(tui_state_dir.as_deref()),
         Some(Command::Enter(args)) => threads::enter(&service, &adapter, args),
         Some(Command::Thread { command }) => threads::dispatch(&service, &adapter, command),
         Some(Command::View { command }) => views::dispatch(&service, command),
@@ -94,5 +94,39 @@ pub fn run() -> Result<()> {
         Some(Command::Hook(_) | Command::Daemon { .. }) => {
             unreachable!("handled before the store opens")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parser_accepts_a_state_directory_and_daemon_status_json() {
+        let cli = Cli::try_parse_from([
+            "mitos",
+            "--state-dir",
+            "/var/lib/mitos",
+            "daemon",
+            "status",
+            "--json",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.state_dir, Some(PathBuf::from("/var/lib/mitos")));
+        assert!(matches!(
+            cli.command,
+            Some(Command::Daemon {
+                command: args::DaemonCommand::Status { json: true }
+            })
+        ));
+    }
+
+    #[test]
+    fn parser_defaults_to_launching_the_tui() {
+        let cli = Cli::try_parse_from(["mitos"]).unwrap();
+
+        assert!(cli.state_dir.is_none());
+        assert!(cli.command.is_none());
     }
 }

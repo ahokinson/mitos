@@ -230,6 +230,59 @@ mod tests {
     }
 
     #[test]
+    fn malformed_and_incomplete_records_do_not_make_a_session() {
+        let request = default_request();
+        assert!(
+            SessionParser::parse(
+                Path::new("missing.jsonl"),
+                "not json\n[]\n{\"type\":\"cost-state\",\"modelUsage\":{\"bad\":null}}",
+                &request,
+            )
+            .is_none()
+        );
+
+        assert!(
+            SessionParser::parse(
+                Path::new("missing.jsonl"),
+                r#"{"type":"user","message":{"content":[{"type":"tool_result"}]}}"#,
+                &request,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn parser_keeps_valid_message_data_when_optional_fields_are_missing() {
+        let fixture = Fixture::new(
+            "ses_1",
+            &[
+                json!({
+                    "type": "user", "cwd": "/home/work", "timestamp": "2026-01-02T03:04:05Z",
+                    "message": { "content": [{ "type": "text", "text": "title from text" }] }
+                }),
+                json!({
+                    "type": "assistant", "timestamp": "2026-01-02T04:04:05Z",
+                    "message": {
+                        "id": "msg_1", "content": [{ "type": "tool_use" }, { "type": "unknown" }],
+                        "usage": { "input_tokens": 1, "output_tokens_details": {} }
+                    }
+                }),
+                json!({
+                    "type": "cost-state", "totalCostUSD": 1.5,
+                    "modelUsage": { "valid": { "costUSD": 1.5 }, "invalid": {} }
+                }),
+            ],
+        );
+
+        let report = fixture.mine(&default_request());
+
+        assert_eq!(report.sessions[0].title, "title from text");
+        assert_eq!(report.totals.messages_assistant, 1);
+        assert_eq!(report.totals.tokens_input, 1);
+        assert_eq!(report.cost_by_model[0].label, "valid");
+    }
+
+    #[test]
     fn an_empty_project_root_mines_nothing() {
         let root = std::env::temp_dir().join(format!("mitos-claude-{}", crate::domain::id()));
         std::fs::create_dir_all(&root).unwrap();

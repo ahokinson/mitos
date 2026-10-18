@@ -664,6 +664,31 @@ mod tests {
     }
 
     #[test]
+    fn errors_and_tools_fall_back_to_their_available_details() {
+        let step = SessionStream::new(SESSION, None).process(&event_of(
+            "session.error",
+            json!({ "error": { "message": "plain message" } }),
+        ));
+        assert_eq!(step.events[0].content.as_deref(), Some("plain message"));
+
+        let tool = SessionStream::new(SESSION, None).process(&event_of(
+            "message.part.updated",
+            json!({ "part": {
+                "id": "prt_t", "type": "tool", "callID": "call_1",
+                "state": { "status": "completed", "input": { "url": "https://example.test" } }
+            } }),
+        ));
+        assert_eq!(
+            tool.events[0].content.as_deref(),
+            Some("tool: https://example.test")
+        );
+        assert_eq!(
+            tool.events[1].content.as_deref(),
+            Some("tool: https://example.test")
+        );
+    }
+
+    #[test]
     fn a_permission_ask_becomes_a_permission_request_and_maps_to_a_reply() {
         let mut stream = SessionStream::new(SESSION, None);
         let step = stream.process(&event_of(

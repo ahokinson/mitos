@@ -130,279 +130,157 @@ pub fn drive_turn(
     }
 }
 
-#[cfg(all(test, unix))]
-#[allow(clippy::needless_pass_by_value)]
+#[cfg(test)]
 mod tests {
-    use std::io::{BufRead, BufReader, Read, Write};
-    use std::net::{Shutdown, TcpListener, TcpStream};
+    use std::fmt::Write as _;
     use std::path::Path;
-    use std::thread;
-    use std::time::Duration;
+    use std::sync::{Arc, Mutex};
 
-    use super::super::clients::base64;
+    use super::super::clients::ServerClient;
+    use super::super::clients::test_support::{
+        client_with_connection_error, client_with_responses, http_response,
+    };
     use super::*;
     use crate::domain::ThreadMode;
-    use crate::harnesses::fixtures::{FakeProgram, kinds_of};
-    use crate::harnesses::opencode::clients::ServerAccess;
-    use crate::harnesses::opencode::daemon;
 
     const SESSION: &str = "ses_fake";
 
-    #[derive(Clone)]
-    struct Recorded {
-        path: String,
-        body: Value,
-        authorization: Option<String>,
+    fn kinds_of(events: &[AdapterEvent]) -> Vec<&str> {
+        events.iter().map(|event| event.event.as_str()).collect()
     }
 
-    type OnPrompt = Arc<dyn Fn(&Fake) + Send + Sync>;
-
-    /// A fake `opencode serve`: `on_prompt` runs once each prompt is accepted.
-    #[derive(Clone)]
-    struct Fake {
-        base: String,
-        requests: Arc<Mutex<Vec<Recorded>>>,
-        sse: Arc<Mutex<Option<TcpStream>>>,
-        on_prompt: OnPrompt,
+    fn server_event(kind: &str, properties: impl Into<Value>) -> Value {
+        let properties = properties.into();
+        let mut properties = properties.as_object().unwrap().clone();
+        properties.insert("sessionID".into(), json!(SESSION));
+        json!({ "type": kind, "properties": properties })
     }
 
-    impl Fake {
-        fn start(on_prompt: impl Fn(&Fake) + Send + Sync + 'static) -> Self {
-            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-            let fake = Self {
-                base: format!("http://{}", listener.local_addr().unwrap()),
-                requests: Arc::default(),
-                sse: Arc::default(),
-                on_prompt: Arc::new(on_prompt),
-            };
-            let server = fake.clone();
-            thread::spawn(move || {
-                for stream in listener.incoming().map_while(Result::ok) {
-                    let server = server.clone();
-                    thread::spawn(move || server.serve(stream));
-                }
-            });
-            fake
+    fn sse(events: impl IntoIterator<Item = Value>) -> String {
+        let mut body = String::new();
+        for event in events {
+            writeln!(body, "data: {event}\n").unwrap();
         }
-
-        fn serve(&self, mut stream: TcpStream) {
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut request_line = String::new();
-            reader.read_line(&mut request_line).unwrap();
-            let target = request_line
-                .split_whitespace()
-                .nth(1)
-                .unwrap_or("")
-                .to_string();
-            let (mut length, mut authorization) = (0usize, None);
-            loop {
-                let mut header = String::new();
-                reader.read_line(&mut header).unwrap();
-                let header = header.trim();
-                if header.is_empty() {
-                    break;
-                }
-                let lower = header.to_ascii_lowercase();
-                if let Some(value) = lower.strip_prefix("content-length:") {
-                    length = value.trim().parse().unwrap_or(0);
-                } else if lower.starts_with("authorization:") {
-                    authorization = Some(header["authorization:".len()..].trim().to_string());
-                }
-            }
-            let mut body = vec![0; length];
-            reader.read_exact(&mut body).unwrap();
-            let path = target.split('?').next().unwrap_or("").to_string();
-            self.requests.lock().unwrap().push(Recorded {
-                path: path.clone(),
-                body: serde_json::from_slice(&body).unwrap_or(Value::Null),
-                authorization: authorization.clone(),
-            });
-            let respond = |stream: &mut TcpStream, status: &str, body: &str| {
-                let _ = write!(
-                    stream,
-                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-            };
-            if authorization.is_none() {
-                return respond(&mut stream, "401 Unauthorized", "unauthorized");
-            }
-            if path == "/event" {
-                *self.sse.lock().unwrap() = Some(stream.try_clone().unwrap());
-                let _ = write!(
-                    stream,
-                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
-                     data: {{\"type\":\"server.connected\",\"properties\":{{}}}}\n\n"
-                );
-            } else if path == "/session" {
-                respond(&mut stream, "200 OK", &format!("{{\"id\":\"{SESSION}\"}}"));
-            } else if path.ends_with("/prompt_async") {
-                respond(&mut stream, "204 No Content", "");
-                (self.on_prompt)(self);
-            } else {
-                respond(&mut stream, "200 OK", "true");
-            }
-        }
-
-        fn push(&self, kind: &str, properties: Value) {
-            let mut properties = properties.as_object().unwrap().clone();
-            properties.insert("sessionID".into(), json!(SESSION));
-            let frame = json!({ "type": kind, "properties": properties });
-            if let Some(stream) = self.sse.lock().unwrap().as_mut() {
-                let _ = write!(stream, "data: {frame}\n\n");
-                let _ = stream.flush();
-            }
-        }
-
-        fn close(&self) {
-            if let Some(stream) = self.sse.lock().unwrap().take() {
-                let _ = stream.shutdown(Shutdown::Both);
-            }
-        }
-
-        /// The server handles each connection on its own thread, so a request
-        /// the client just made may not be recorded yet.
-        fn request(&self, matches: impl Fn(&Recorded) -> bool) -> Option<Recorded> {
-            for _ in 0..400 {
-                if let Some(found) = self.requests.lock().unwrap().iter().find(|r| matches(r)) {
-                    return Some(found.clone());
-                }
-                thread::sleep(Duration::from_millis(5));
-            }
-            None
-        }
-
-        fn client(&self) -> ServerClient {
-            ServerClient::new(
-                &ServerAccess {
-                    base: self.base.clone(),
-                    password: "pw".into(),
-                },
-                "/work",
-            )
-        }
+        http_response("200 OK", "text/event-stream", &body)
     }
 
-    fn finish_with_a_reply(fake: &Fake) {
-        fake.push(
-            "message.updated",
-            json!({ "info": { "id": "msg_a", "role": "assistant", "modelID": "m" } }),
-        );
-        fake.push(
-            "message.part.updated",
-            json!({ "part": { "id": "prt_1", "type": "text", "messageID": "msg_a", "text": "done", "time": { "start": 1, "end": 2 } } }),
-        );
-        fake.push("session.idle", json!({}));
-        fake.push("session.idle", json!({}));
-    }
-
-    fn drive(
-        client: &ServerClient,
+    fn responses(
         session: Option<&str>,
-        mode: ThreadMode,
-        ephemeral: bool,
+        events: impl IntoIterator<Item = Value>,
+        replies: usize,
+        delete: bool,
+    ) -> Vec<String> {
+        let mut responses = Vec::new();
+        if session.is_none() {
+            responses.push(http_response(
+                "200 OK",
+                "application/json",
+                &json!({ "id": SESSION }).to_string(),
+            ));
+        }
+        responses.push(http_response("200 OK", "application/json", "true"));
+        responses.push(sse(events));
+        responses.push(http_response("204 No Content", "application/json", ""));
+        for _ in 0..replies {
+            responses.push(http_response("200 OK", "application/json", "true"));
+        }
+        if delete {
+            responses.push(http_response("200 OK", "application/json", "true"));
+        }
+        responses
+    }
+
+    fn completed_events() -> Vec<Value> {
+        vec![
+            server_event(
+                "message.updated",
+                json!({ "info": { "id": "msg_a", "role": "assistant", "modelID": "m" } }),
+            ),
+            server_event(
+                "message.part.updated",
+                json!({ "part": { "id": "prt_1", "type": "text", "messageID": "msg_a", "text": "done", "time": { "start": 1, "end": 2 } } }),
+            ),
+            server_event("session.idle", json!({})),
+        ]
+    }
+
+    fn turn(session: Option<&str>, mode: ThreadMode, ephemeral: bool) -> Turn<'_> {
+        Turn {
+            workdir: Path::new("/work"),
+            text: "hello",
+            session,
+            mode,
+            ephemeral,
+            agent: None,
+            model: None,
+        }
+    }
+
+    fn collect(
+        client: &ServerClient,
+        turn: &Turn<'_>,
         pending: &SharedPending,
+        on_event: &mut dyn FnMut(&AdapterEvent) -> Result<()>,
     ) -> Vec<AdapterEvent> {
         let mut seen = Vec::new();
         {
             let mut sink = |event: AdapterEvent| {
+                on_event(&event)?;
                 seen.push(event);
                 Ok(())
             };
             let mut emitter = Emitter::new(&mut sink);
-            let turn = Turn {
-                workdir: Path::new("/work"),
-                text: "hello",
-                session,
-                mode,
-                ephemeral,
-                agent: None,
-                model: None,
-            };
-            drive_turn(client, &turn, &mut emitter, pending).unwrap();
+            drive_turn(client, turn, &mut emitter, pending).unwrap();
         }
         seen
     }
 
-    fn drive_plain(fake: &Fake, session: Option<&str>, mode: ThreadMode) -> Vec<AdapterEvent> {
-        drive(
-            &fake.client(),
-            session,
-            mode,
-            false,
-            &SharedPending::default(),
-        )
+    fn recorded(requests: &Arc<Mutex<Vec<u8>>>) -> String {
+        String::from_utf8(requests.lock().unwrap().clone()).unwrap()
     }
 
     #[test]
     fn an_agent_override_replaces_the_mode_default_and_a_model_is_split() {
-        let fake = Fake::start(finish_with_a_reply);
-        let mut seen = Vec::new();
-        {
-            let mut sink = |event: AdapterEvent| {
-                seen.push(event);
-                Ok(())
-            };
-            let mut emitter = Emitter::new(&mut sink);
-            let turn = Turn {
-                workdir: Path::new("/work"),
-                text: "hello",
-                session: None,
-                mode: ThreadMode::Build,
-                ephemeral: false,
-                agent: Some("review"),
-                model: Some("opencode/glm-5.3"),
-            };
-            drive_turn(
-                &fake.client(),
-                &turn,
-                &mut emitter,
-                &SharedPending::default(),
-            )
-            .unwrap();
-        }
-        assert_eq!(seen.last().unwrap().event, kinds::TURN_COMPLETE);
-        let prompt = fake.request(|r| r.path.ends_with("/prompt_async")).unwrap();
-        assert_eq!(prompt.body["agent"], "review");
-        assert_eq!(
-            prompt.body["model"],
-            json!({ "providerID": "opencode", "modelID": "glm-5.3" })
-        );
+        let (client, requests) =
+            client_with_responses(responses(None, completed_events(), 0, false));
+        let mut turn = turn(None, ThreadMode::Build, false);
+        turn.agent = Some("review");
+        turn.model = Some("opencode/glm-5.3");
+        let events = collect(&client, &turn, &SharedPending::default(), &mut |_| Ok(()));
+
+        assert_eq!(events.last().unwrap().event, kinds::TURN_COMPLETE);
+        let requests = recorded(&requests);
+        assert!(requests.contains(r#"{"agent":"review""#));
+        assert!(requests.contains(r#""model":{"providerID":"opencode","modelID":"glm-5.3"}"#));
     }
 
     #[test]
     fn an_ephemeral_turn_deletes_its_session_afterwards() {
-        let fake = Fake::start(finish_with_a_reply);
-        drive(
-            &fake.client(),
-            None,
-            ThreadMode::Plan,
-            true,
-            &SharedPending::default(),
-        );
-        assert!(
-            fake.request(|r| r.path == format!("/session/{SESSION}"))
-                .is_some()
-        );
+        let (client, requests) =
+            client_with_responses(responses(None, completed_events(), 0, true));
+        let turn = turn(None, ThreadMode::Plan, true);
+        collect(&client, &turn, &SharedPending::default(), &mut |_| Ok(()));
+
+        assert!(recorded(&requests).contains("DELETE /session/ses_fake?directory="));
     }
 
     #[test]
     fn a_persistent_turn_keeps_its_session() {
-        let fake = Fake::start(finish_with_a_reply);
-        drive_plain(&fake, None, ThreadMode::Build);
-        assert!(
-            fake.requests
-                .lock()
-                .unwrap()
-                .iter()
-                .all(|r| r.path != format!("/session/{SESSION}"))
-        );
+        let (client, requests) =
+            client_with_responses(responses(None, completed_events(), 0, false));
+        let turn = turn(None, ThreadMode::Build, false);
+        collect(&client, &turn, &SharedPending::default(), &mut |_| Ok(()));
+
+        assert!(!recorded(&requests).contains("DELETE /session/ses_fake?directory="));
     }
 
     #[test]
     fn a_new_session_streams_a_turn_and_ends_with_one_turn_complete() {
-        let fake = Fake::start(finish_with_a_reply);
-        let events = drive_plain(&fake, None, ThreadMode::Build);
+        let (client, requests) =
+            client_with_responses(responses(None, completed_events(), 0, false));
+        let turn = turn(None, ThreadMode::Build, false);
+        let events = collect(&client, &turn, &SharedPending::default(), &mut |_| Ok(()));
+
         assert_eq!(
             kinds_of(&events),
             [
@@ -412,84 +290,72 @@ mod tests {
             ]
         );
         assert_eq!(events[0].native_session, Some(json!(SESSION)));
-        let prompt = fake.request(|r| r.path.ends_with("/prompt_async")).unwrap();
-        assert_eq!(
-            prompt.body,
-            json!({ "agent": "build", "parts": [{ "type": "text", "text": "hello" }] })
+        assert!(
+            recorded(&requests)
+                .contains(r#"{"agent":"build","parts":[{"type":"text","text":"hello"}]}"#)
         );
     }
 
     #[test]
     fn an_existing_session_is_resumed_without_creating_one() {
-        let fake = Fake::start(|fake| {
-            fake.push(
+        let events = vec![
+            server_event(
                 "message.updated",
                 json!({ "info": { "id": "msg_a", "role": "assistant" } }),
-            );
-            fake.push("session.idle", json!({}));
-        });
-        let events = drive_plain(&fake, Some(SESSION), ThreadMode::Plan);
+            ),
+            server_event("session.idle", json!({})),
+        ];
+        let (client, requests) = client_with_responses(responses(Some(SESSION), events, 0, false));
+        let turn = turn(Some(SESSION), ThreadMode::Plan, false);
+        let events = collect(&client, &turn, &SharedPending::default(), &mut |_| Ok(()));
+
         assert_eq!(events.last().unwrap().event, kinds::TURN_COMPLETE);
-        let prompt = fake.request(|r| r.path.ends_with("/prompt_async")).unwrap();
-        assert_eq!(prompt.body["agent"], "plan");
-        assert!(
-            fake.requests
-                .lock()
-                .unwrap()
-                .iter()
-                .all(|r| r.path != "/session")
-        );
+        let requests = recorded(&requests);
+        assert!(requests.contains(r#"{"agent":"plan""#));
+        assert!(!requests.contains("POST /session?directory="));
     }
 
     #[test]
     fn a_permission_ask_is_answered_over_the_permission_endpoint() {
-        let fake = Fake::start(|fake| {
-            fake.push(
+        let events = vec![
+            server_event(
                 "permission.asked",
                 json!({ "id": "per_1", "permission": "bash", "patterns": ["ls"] }),
-            );
-            let waiting = fake.clone();
-            thread::spawn(move || {
-                waiting.request(|r| r.path == "/permission/per_1/reply");
-                waiting.push("session.idle", json!({}));
-            });
-        });
-        let client = fake.client();
+            ),
+            server_event("session.idle", json!({})),
+        ];
+        let (client, requests) = client_with_responses(responses(None, events, 1, false));
         let pending = SharedPending::default();
-        let answering = {
-            let (client, pending) = (client.clone(), pending.clone());
-            thread::spawn(move || {
-                while !pending.lock().unwrap().contains_key("per_1") {
-                    thread::sleep(Duration::from_millis(5));
-                }
-                answer_handler(client, pending)(json!({
+        let mut answer = answer_handler(client.clone(), pending.clone());
+        let turn = turn(None, ThreadMode::Build, false);
+        let events = collect(&client, &turn, &pending, &mut |event| {
+            if event.event == kinds::REQUEST {
+                answer(json!({
                     "action": "answer",
                     "request_id": "per_1",
                     "response": { "allow": true }
-                }))
-                .unwrap();
-            })
-        };
-        let events = drive(&client, None, ThreadMode::Build, false, &pending);
-        answering.join().unwrap();
+                }))?;
+            }
+            Ok(())
+        });
+
         assert!(kinds_of(&events).contains(&kinds::REQUEST));
         assert_eq!(events.last().unwrap().event, kinds::TURN_COMPLETE);
-        let reply = fake
-            .request(|r| r.path == "/permission/per_1/reply")
-            .unwrap();
-        assert_eq!(reply.body, json!({ "reply": "once" }));
+        let requests = recorded(&requests);
+        assert!(requests.contains("POST /permission/per_1/reply?directory="));
+        assert!(requests.contains(r#"{"reply":"once"}"#));
     }
 
     #[test]
     fn a_session_error_ends_the_turn_with_exactly_one_error() {
-        let fake = Fake::start(|fake| {
-            fake.push(
-                "session.error",
-                json!({ "error": { "name": "UnknownError", "data": { "message": "boom" } } }),
-            );
-            fake.push("session.idle", json!({}));
-        });
-        let events = drive_plain(&fake, None, ThreadMode::Build);
+        let events = vec![server_event(
+            "session.error",
+            json!({ "error": { "name": "UnknownError", "data": { "message": "boom" } } }),
+        )];
+        let (client, _) = client_with_responses(responses(None, events, 0, false));
+        let turn = turn(None, ThreadMode::Build, false);
+        let events = collect(&client, &turn, &SharedPending::default(), &mut |_| Ok(()));
+
         let terminal: Vec<_> = events
             .iter()
             .filter(|event| event.event == kinds::ERROR || event.event == kinds::TURN_COMPLETE)
@@ -500,8 +366,10 @@ mod tests {
 
     #[test]
     fn a_stream_that_closes_early_is_reported_as_an_error() {
-        let fake = Fake::start(Fake::close);
-        let events = drive_plain(&fake, None, ThreadMode::Build);
+        let (client, _) = client_with_responses(responses(None, [], 0, false));
+        let turn = turn(None, ThreadMode::Build, false);
+        let events = collect(&client, &turn, &SharedPending::default(), &mut |_| Ok(()));
+
         assert_eq!(events.last().unwrap().event, kinds::ERROR);
         assert!(
             events
@@ -516,124 +384,17 @@ mod tests {
 
     #[test]
     fn an_unreachable_server_is_reported_as_an_error() {
-        let mut fake = Fake::start(|_| {});
-        fake.base = "http://127.0.0.1:1".into();
-        let events = drive_plain(&fake, None, ThreadMode::Build);
+        let client = client_with_connection_error();
+        let turn = turn(None, ThreadMode::Build, false);
+        let events = collect(&client, &turn, &SharedPending::default(), &mut |_| Ok(()));
+
         assert_eq!(kinds_of(&events), [kinds::ERROR]);
-    }
-
-    #[test]
-    fn the_server_is_started_with_a_private_password_and_found_by_its_log_line() {
-        let fake = Fake::start(finish_with_a_reply);
-        let program = FakeProgram::new(&format!(
-            r#"dir="$(dirname "$0")"
-printf '%s:%s' "$OPENCODE_SERVER_USERNAME" "$OPENCODE_SERVER_PASSWORD" > "$dir/creds"
-printf '%s ' "$@" > "$dir/args"
-echo "opencode server listening on {}"
-"#,
-            fake.base
-        ));
-        let mut seen = Vec::new();
-        {
-            let mut sink = |event: AdapterEvent| {
-                seen.push(event);
-                Ok(())
-            };
-            let mut emitter = Emitter::new(&mut sink);
-            let turn = Turn {
-                workdir: &program.dir,
-                text: "hello",
-                session: None,
-                mode: ThreadMode::Build,
-                ephemeral: false,
-                agent: None,
-                model: None,
-            };
-            run_turn(program.path.as_os_str(), &turn, &mut emitter, None).unwrap();
-        }
-        assert_eq!(seen.last().unwrap().event, kinds::TURN_COMPLETE);
-        let creds = std::fs::read_to_string(program.dir.join("creds")).unwrap();
-        assert!(creds.starts_with("mitos:") && creds.len() > "mitos:".len());
-        let args = std::fs::read_to_string(program.dir.join("args")).unwrap();
-        assert_eq!(args, "serve --port 0 --hostname 127.0.0.1 ");
-        let session = fake.request(|r| r.path == "/session").unwrap();
-        assert_eq!(
-            session.authorization,
-            Some(format!("Basic {}", base64(creds.as_bytes())))
-        );
-    }
-
-    #[test]
-    fn a_server_that_exits_before_listening_reports_stderr_or_its_exit_code() {
-        fn failure(program: &FakeProgram) -> String {
-            let mut seen = Vec::new();
-            {
-                let mut sink = |event: AdapterEvent| {
-                    seen.push(event);
-                    Ok(())
-                };
-                let mut emitter = Emitter::new(&mut sink);
-                let turn = Turn {
-                    workdir: &program.dir,
-                    text: "hello",
-                    session: None,
-                    mode: ThreadMode::Build,
-                    ephemeral: false,
-                    agent: None,
-                    model: None,
-                };
-                run_turn(program.path.as_os_str(), &turn, &mut emitter, None).unwrap();
-            }
-            assert_eq!(kinds_of(&seen), [kinds::ERROR]);
-            seen[0].content.clone().unwrap()
-        }
-
-        assert_eq!(
-            failure(&FakeProgram::new("exit 3")),
-            "opencode serve exited with code 3"
-        );
-        assert_eq!(
-            failure(&FakeProgram::new("echo 'provider missing' >&2\nexit 3")),
-            "provider missing"
-        );
-    }
-
-    #[test]
-    fn a_turn_prefers_the_shared_daemon_server_over_a_private_one() {
-        let fake = Fake::start(finish_with_a_reply);
-        daemon::set_test_server(Some(ServerAccess {
-            base: fake.base.clone(),
-            password: "pw".into(),
-        }));
-        let program = FakeProgram::new("exit 3 # must not run: the shared server wins");
-
-        let mut seen = Vec::new();
-        {
-            let mut sink = |event: AdapterEvent| {
-                seen.push(event);
-                Ok(())
-            };
-            let mut emitter = Emitter::new(&mut sink);
-            let turn = Turn {
-                workdir: &program.dir,
-                text: "hello",
-                session: None,
-                mode: ThreadMode::Build,
-                ephemeral: false,
-                agent: None,
-                model: None,
-            };
-            run_turn(program.path.as_os_str(), &turn, &mut emitter, None).unwrap();
-        }
-        daemon::set_test_server(None);
-
-        assert_eq!(seen.last().unwrap().event, kinds::TURN_COMPLETE);
-        let prompt = fake.request(|r| r.path.ends_with("/prompt_async")).unwrap();
-        assert_eq!(prompt.body["agent"], "build");
-        let session = fake.request(|r| r.path == "/session").unwrap();
-        assert_eq!(
-            session.authorization,
-            Some(format!("Basic {}", base64("mitos:pw".as_bytes())))
+        assert!(
+            events[0]
+                .content
+                .as_deref()
+                .unwrap()
+                .contains("opencode /session failed")
         );
     }
 }

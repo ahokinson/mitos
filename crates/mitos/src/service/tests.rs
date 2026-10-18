@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 
-use super::ThreadService;
+use super::{ThreadNotes, ThreadService};
 use crate::domain::{
     CompactMode, EventKind, HarnessKind, Reply, RequestStatus, ThreadId, ThreadMode, ThreadStatus,
     id,
@@ -26,6 +26,7 @@ struct FakeAdapter {
     start_session: Option<Value>,
     send_events: Vec<Value>,
     handoff: Option<Value>,
+    launch: Option<Value>,
     calls: RefCell<Vec<&'static str>>,
     sent: RefCell<Vec<(Option<Value>, String)>>,
     started_with: RefCell<Vec<String>>,
@@ -40,6 +41,7 @@ impl FakeAdapter {
             start_session: None,
             send_events: Vec::new(),
             handoff: None,
+            launch: None,
             calls: RefCell::new(Vec::new()),
             sent: RefCell::new(Vec::new()),
             started_with: RefCell::new(Vec::new()),
@@ -66,7 +68,11 @@ impl HarnessAdapter for FakeAdapter {
     }
 
     fn prepare_launch(&self, _request: &AdapterRequest) -> Result<LaunchPlan> {
-        Err(anyhow!("prepare_launch is not used by the service"))
+        self.calls.borrow_mut().push("prepare_launch");
+        match &self.launch {
+            Some(launch) => Ok(serde_json::from_value(launch.clone())?),
+            None => Err(anyhow!("prepare_launch is not used by the service")),
+        }
     }
 
     fn collect_handoff(&self, _request: &HandoffRequest) -> Result<CollectedHandoff> {
@@ -135,6 +141,66 @@ fn the_fake_adapter_keeps_no_history_to_mine() {
     let request = MiningRequest::new(None, None, 10);
     assert_eq!(adapter.mine_history(&request), MiningReport::default());
     assert_eq!(adapter.calls(), ["mine_history"]);
+}
+
+#[test]
+fn notes_require_content_and_keep_each_kind_in_order() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(Some("claude"));
+
+    assert_eq!(
+        fixture
+            .service()
+            .note(
+                &thread_id,
+                ThreadNotes {
+                    note: None,
+                    decisions: Vec::new(),
+                    questions: Vec::new(),
+                },
+            )
+            .unwrap_err()
+            .to_string(),
+        "provide --note, --decision, or --question"
+    );
+
+    fixture
+        .service()
+        .note(
+            &thread_id,
+            ThreadNotes {
+                note: Some("remember this".into()),
+                decisions: vec!["use SQLite".into(), "keep it local".into()],
+                questions: vec!["what is the retention period?".into()],
+            },
+        )
+        .unwrap();
+
+    let recorded: Vec<_> = fixture
+        .store
+        .events_since(&thread_id, 0)
+        .unwrap()
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event.kind,
+                EventKind::Note | EventKind::Decision | EventKind::Question
+            )
+        })
+        .collect();
+    assert_eq!(recorded.len(), 4);
+    assert_eq!(recorded[0].kind, EventKind::Note);
+    assert_eq!(recorded[0].content.as_deref(), Some("remember this"));
+    assert_eq!(recorded[1].kind, EventKind::Decision);
+    assert_eq!(recorded[1].content.as_deref(), Some("use SQLite"));
+    assert_eq!(recorded[2].kind, EventKind::Decision);
+    assert_eq!(recorded[2].content.as_deref(), Some("keep it local"));
+    assert_eq!(recorded[3].kind, EventKind::Question);
+    assert_eq!(
+        recorded[3].content.as_deref(),
+        Some("what is the retention period?")
+    );
+    assert!(recorded.iter().all(|event| event.harness.is_none()));
 }
 
 struct Fixture {
@@ -1009,8 +1075,12 @@ fn answer_cancels_the_request_when_the_turn_is_gone() {
         .unwrap()
         .remove(0);
 
-    let error = fixture
-        .service()
+    let deliver =
+        |_path: &Path, _answer: &Value| -> Result<()> { Err(anyhow!("answer delivery failed")) };
+    let service =
+        ThreadService::with_answer_delivery(&fixture.store, &DeterministicRenderer, &deliver);
+
+    let error = service
         .answer(&thread_id, &request.id, &json!({"allow": true}))
         .unwrap_err();
 
@@ -1271,4 +1341,115 @@ fn sync_returns_only_events_after_the_cursor() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].kind, EventKind::AssistantMessage);
     assert!(fixture.service().sync(&thread_id, 3).unwrap().is_empty());
+}
+
+#[test]
+fn entry_reassigns_the_harness_and_records_notes_when_it_finishes() {
+    let fixture = Fixture::new();
+    let workspace = fixture
+        .store
+        .workspace_for(&fixture.root, None, "entry-key")
+        .unwrap();
+    let thread = fixture.store.create_thread(&workspace.id).unwrap();
+    fixture
+        .service()
+        .bind_harness(&thread.id, HarnessKind::Claude, None)
+        .unwrap();
+    let thread_id = thread.id;
+    let mut adapter = FakeAdapter::new();
+    adapter.launch = Some(json!({ "program": "codex", "native_session": "launch" }));
+
+    let entry = fixture
+        .service()
+        .begin_entry(
+            &thread_id,
+            HarnessKind::Codex,
+            Some("provided".into()),
+            &adapter,
+        )
+        .unwrap();
+
+    assert_eq!(entry.workdir, fixture.root);
+    assert_eq!(entry.launch.env["MITOS_THREAD_ID"], thread_id.to_string());
+    assert_eq!(
+        fixture.store.get_thread(&thread_id).unwrap().active_harness,
+        Some(HarnessKind::Codex)
+    );
+    assert!(
+        fixture
+            .kinds(&thread_id)
+            .contains(&EventKind::HarnessUnbound)
+    );
+
+    let mining_failure = fixture
+        .service()
+        .finish_entry(
+            entry,
+            ThreadNotes {
+                note: Some("finished".into()),
+                decisions: Vec::new(),
+                questions: Vec::new(),
+            },
+            &adapter,
+        )
+        .unwrap();
+
+    assert!(mining_failure.is_some());
+    assert!(fixture.kinds(&thread_id).contains(&EventKind::Note));
+}
+
+#[test]
+fn an_approved_plan_request_switches_the_thread_back_to_build_mode() {
+    let fixture = Fixture::new();
+    let thread_id = fixture.thread(Some("claude"));
+    fixture
+        .service()
+        .set_mode(&thread_id, ThreadMode::Plan)
+        .unwrap();
+    let mut adapter = FakeAdapter::new();
+    adapter.start_events = vec![json!({
+        "event": "request",
+        "payload": {"id": "r1", "kind": "plan_approval", "title": "plan"},
+    })];
+    fixture
+        .service()
+        .send(&thread_id, "plan".into(), &adapter)
+        .unwrap();
+    let request = fixture
+        .service()
+        .pending_requests(&thread_id)
+        .unwrap()
+        .remove(0);
+    let delivered = RefCell::new(Vec::new());
+    let deliver = |_path: &Path, answer: &Value| {
+        delivered.borrow_mut().push(answer.clone());
+        Ok(())
+    };
+    let service =
+        ThreadService::with_answer_delivery(&fixture.store, &DeterministicRenderer, &deliver);
+
+    service
+        .answer(&thread_id, &request.id, &json!({ "approved": true }))
+        .unwrap();
+
+    assert_eq!(delivered.borrow().len(), 1);
+    assert_eq!(
+        delivered.borrow()[0],
+        json!({
+            "action": "answer",
+            "request_id": "r1",
+            "response": { "approved": true },
+        })
+    );
+    assert_eq!(
+        fixture.store.get_thread(&thread_id).unwrap().mode,
+        ThreadMode::Build
+    );
+    assert!(
+        fixture
+            .service()
+            .pending_requests(&thread_id)
+            .unwrap()
+            .is_empty()
+    );
 }

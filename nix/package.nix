@@ -41,7 +41,7 @@ let
   # tree hashes differently per system. Every supported system needs an entry.
   nodeModulesHashes = {
     aarch64-darwin = "sha256-Y24JsZ2cjIcGdZDHVFj5L6Mzr3eUWIfJiTHIotpBEJo=";
-    aarch64-linux = "sha256-dRxo+uQegr/LbGxmu8lE1RU3q170UT8KYRDHrd6djlw=";
+    aarch64-linux = "sha256-xbMew0tPZkzREYp4jDALKDOA4Hgpvqpkyrqg2chRRfo=";
     x86_64-linux = "sha256-mWZRSTG5TRvzpUwI1RGz5/l89Z7GI6BJqi5rSbuQ6xA=";
   };
 

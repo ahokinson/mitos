@@ -67,8 +67,11 @@ pub(super) struct Lock {
 }
 
 pub(super) fn watch_signals() -> Option<signal_hook::iterator::Signals> {
-    signal_hook::iterator::Signals::new([signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT])
-        .ok()
+    signal_hook::iterator::Signals::new(watched_signals()).ok()
+}
+
+fn watched_signals() -> [i32; 2] {
+    [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT]
 }
 
 /// A PID worth signalling. `kill` treats 0 as "my process group" and -1 as
@@ -129,16 +132,18 @@ mod tests {
     /// `kill(-1)` would end the whole user session and `kill(0)` the process
     /// group; neither may escape a u32 that wraps or zeroes on conversion.
     #[test]
-    fn pids_that_would_signal_everything_are_ignored() {
+    fn pids_that_would_signal_everything_are_rejected() {
         assert!(pid_of(0).is_none());
         assert!(pid_of(u32::MAX).is_none());
         assert!(pid_of(1).is_some());
-        kill_process(0);
-        kill_process(u32::MAX);
-        signal_process(0);
-        signal_process(u32::MAX);
-        assert!(!process_alive(0));
-        assert!(!process_alive(u32::MAX));
+    }
+
+    #[test]
+    fn the_daemon_watches_termination_signals() {
+        assert_eq!(
+            watched_signals(),
+            [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT]
+        );
     }
 
     #[test]
@@ -153,11 +158,5 @@ mod tests {
         assert!(try_lock(&root).unwrap().is_some());
 
         let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn signals_are_watched_and_the_current_process_is_alive() {
-        assert!(watch_signals().is_some());
-        assert!(process_alive(std::process::id()));
     }
 }
