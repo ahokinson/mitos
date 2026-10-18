@@ -42,7 +42,7 @@ let
   nodeModulesHashes = {
     aarch64-darwin = "sha256-2hBZ3/85SgDkIX+g3CGEG4N9k/WQgoZ7WaxUjY7WU9o=";
     aarch64-linux = "sha256-dRxo+uQegr/LbGxmu8lE1RU3q170UT8KYRDHrd6djlw=";
-    x86_64-linux = "sha256-mWZRSTG5TRvzpUwI1RGz5/l89Z7GI6BJqi5rSbuQ6xA=";
+    x86_64-linux = "sha256-EKEtO0s7+US2/8tkQX4BlFjX3XvruZ2eiL3SLPoJ1k0=";
   };
 
   # Only the manifests `bun install` reads, not the full `tuiSrc` tree — so
